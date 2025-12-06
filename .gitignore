@@ -48,6 +48,10 @@ secrets/
 # Local development
 .do/
 
+# LocalStack data
+local/tmp/
+**/localstack-data/
+
 # Sensitive data
 files/metadata/users.json
 files/import/*.json
