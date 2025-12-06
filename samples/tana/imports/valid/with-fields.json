@@ -1,0 +1,65 @@
+{
+  "version": "TanaIntermediateFile V0.1",
+  "nodes": [
+    {
+      "uid": "meeting-1",
+      "name": "Product Strategy Meeting",
+      "created": "2024-01-22T10:00:00.000Z",
+      "edited": "2024-01-22T11:30:00.000Z",
+      "type": "node",
+      "children": [
+        {
+          "uid": "field-attendees",
+          "name": "Attendees",
+          "type": "field",
+          "children": [
+            {
+              "uid": "attendee-1",
+              "name": "alice@company.com",
+              "type": "node"
+            },
+            {
+              "uid": "attendee-2",
+              "name": "bob@company.com",
+              "type": "node"
+            }
+          ]
+        },
+        {
+          "uid": "field-date",
+          "name": "Date",
+          "type": "date",
+          "created": "2024-01-22T10:00:00.000Z",
+          "edited": "2024-01-22T10:00:00.000Z"
+        },
+        {
+          "uid": "field-location",
+          "name": "Location",
+          "type": "node",
+          "children": [
+            {
+              "uid": "location-link",
+              "name": "https://meet.company.com/room-123",
+              "type": "url"
+            }
+          ]
+        },
+        {
+          "uid": "action-items",
+          "name": "Action Items",
+          "type": "node",
+          "children": [
+            {
+              "uid": "action-1",
+              "name": "Research competitor features",
+              "created": "2024-01-22T11:15:00.000Z",
+              "edited": "2024-01-22T11:15:00.000Z",
+              "type": "node",
+              "todoState": "todo"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

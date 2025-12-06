@@ -1,0 +1,12 @@
+# Ignore false positives and documentation examples
+README.md
+docs/examples/
+samples/
+*.md
+
+# Ignore test data (but not real secrets)
+testdata/
+tests/
+*_test.go
+*_test.py
+test_*.py

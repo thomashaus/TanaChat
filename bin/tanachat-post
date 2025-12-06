@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""
+Tana Post - Format content as Tana and post to a Tana node
+A portable tool that works with any Tana workspace.
+
+Usage: tana-post [content] [options]
+"""
+
+import json
+import sys
+import os
+import argparse
+import re
+import requests
+from pathlib import Path
+from datetime import datetime
+
+# ANSI color codes
+class Colors:
+    GREEN = '\033[92m'
+    BLUE = '\033[94m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+def error(msg):
+    print(f"{Colors.RED}❌ {msg}{Colors.END}")
+    sys.exit(1)
+
+def success(msg):
+    print(f"{Colors.GREEN}✅ {msg}{Colors.END}")
+
+def info(msg):
+    print(f"{Colors.BLUE}ℹ️  {msg}{Colors.END}")
+
+def warning(msg):
+    print(f"{Colors.YELLOW}⚠️  {msg}{Colors.END}")
+
+def load_config():
+    """Load Tana API configuration from environment or config file"""
+    # Try environment variable first
+    api_token = os.getenv('TANA_API_TOKEN')
+    if api_token:
+        return {'api_token': api_token}
+
+    # Try config file in current directory
+    config_files = [
+        Path('./tana-config.json'),
+        Path('./.tana-config.json'),
+        Path('../tana-config.json'),
+        Path('~/.tana-config.json').expanduser()
+    ]
+
+    for config_file in config_files:
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+
+                api_token = config.get("api_token")
+                if api_token and api_token != "YOUR_TANA_API_TOKEN_HERE":
+                    info(f"Using config from: {config_file}")
+                    return config
+            except Exception as e:
+                warning(f"Failed to read config from {config_file}: {e}")
+
+    error("""
+Tana API token not found. Please set it up using one of these methods:
+
+1. Environment variable:
+   export TANA_API_TOKEN="your_token_here"
+
+2. Config file:
+   echo '{"api_token": "your_token_here"}' > tana-config.json
+
+Get your API token from Tana Settings → API → Create Token
+    """)
+
+def clean_text(text, preserve_emphasis=False):
+    """Clean text for Tana"""
+    if not preserve_emphasis:
+        # Remove markdown formatting
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Bold
+        text = re.sub(r'\*(.*?)\*', r'\1', text)        # Italic
+        text = re.sub(r'`(.*?)`', r'\1', text)          # Inline code
+
+    # Remove markdown links but keep text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+    # Clean up extra whitespace
+    text = re.sub(r'\n+', ' ', text)
+    text = text.strip()
+    return text
+
+def convert_markdown_to_tana(content, options):
+    """Convert markdown to Tana format"""
+    lines = content.split('\n')
+    result = []
+    current_level = 0
+
+    for line in lines:
+        line = line.rstrip()
+
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Handle headings
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            title = clean_text(heading_match.group(2), options.preserve_emphasis)
+
+            indent = '  ' * (level - 1)
+            bullet = options.bullet if options.bullet else "- "
+
+            # Add supertag if specified and this is the first heading
+            if options.supertag and not any('supertag' in prev_line for prev_line in result):
+                result.append(f'{indent}{bullet}{title} ${options.field_sep}{options.supertag}')
+            else:
+                result.append(f'{indent}{bullet}{title}')
+
+            current_level = level
+            continue
+
+        # Handle lists
+        list_match = re.match(r'^\s*[-*+]\s+(.+)$', line)
+        if list_match:
+            content = clean_text(list_match.group(1), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            bullet = options.bullet if options.bullet else "- "
+            result.append(f'{indent}{bullet}{content}')
+            continue
+
+        # Handle numbered lists
+        numbered_match = re.match(r'^\s*\d+\.\s+(.+)$', line)
+        if numbered_match:
+            content = clean_text(numbered_match.group(1), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            result.append(f'{indent}{content}')
+            continue
+
+        # Handle task lists
+        task_match = re.match(r'^\s*[-*+]\s+\[([ x])\]\s+(.+)$', line)
+        if task_match:
+            status = task_match.group(1)
+            content = clean_text(task_match.group(2), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            checkbox = "☑" if status == 'x' else "☐"
+            result.append(f'{indent}{checkbox} {content}')
+            continue
+
+        # Handle regular content
+        if line.strip():
+            # Skip YAML frontmatter
+            if line.startswith('---') and result == []:
+                continue
+            if ':' in line and not result:
+                continue
+
+            content = clean_text(line, options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            result.append(f'{indent}{content}')
+
+    return '\n'.join(result)
+
+def post_to_tana(target_node_id, content, config, dry_run=False):
+    """Post content to Tana node using Input API"""
+
+    # Tana Input API endpoint
+    api_url = "https://europe-west1-tagr-prod.cloudfunctions.net/addToNodeV2"
+
+    # Create a single node with the content
+    node = {
+        "name": content
+    }
+
+    payload = {
+        "targetNodeId": target_node_id,
+        "nodes": [node]
+    }
+
+    if dry_run:
+        info(f"{Colors.YELLOW}DRY RUN:{Colors.END} Would post to node {target_node_id}")
+        info(f"Content preview: {content[:100]}...")
+        return True
+
+    # Make API call
+    headers = {
+        "Authorization": f"Bearer {config['api_token']}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+
+        if response.status_code == 200:
+            success("Content posted to Tana successfully!")
+            return True
+        elif response.status_code == 401:
+            error("Authentication failed. Please check your Tana API token.")
+        elif response.status_code == 403:
+            error("Permission denied. Check if the token has write access.")
+        elif response.status_code == 404:
+            error(f"Target node not found: {target_node_id}")
+        else:
+            error(f"Tana API error: {response.status_code} - {response.text}")
+
+    except requests.exceptions.RequestException as e:
+        error(f"Failed to connect to Tana API: {e}")
+
+    return False
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Format content as Tana and post to a Tana node",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-post "Meeting notes discussed project timeline"                    # Quick post
+  tana-post -f notes.md -n "INBOX"                                      # Post file content
+  tana-post -f notes.md -n "node_id" --supertag "Meeting"               # With supertag
+  tana-post "Task completed" -n "INBOX" --dry-run                        # Preview only
+
+Configuration Methods:
+  1. Environment variable: export TANA_API_TOKEN="your_token_here"
+  2. Config file: echo '{"api_token": "your_token_here"}' > tana-config.json
+
+Common target nodes:
+  INBOX           - Your Tana inbox
+  SCHEMA/INBOX    - Schema inbox
+  node_abc123     - Specific node ID
+
+Get your API token from Tana Settings → API → Create Token
+        """
+    )
+
+    parser.add_argument("content", nargs="?", help="Content to post (or use -f for file)")
+    parser.add_argument("-f", "--file", help="Read content from markdown file")
+    parser.add_argument("-n", "--node", required=True, help="Target node ID or name (e.g., INBOX)")
+    parser.add_argument("--supertag", help="Add supertag to first heading")
+    parser.add_argument("--preserve-emphasis", action="store_true",
+                       help="Keep *italic* and **bold** formatting")
+    parser.add_argument("--field-sep", default=":", help="Field separator (default: ':')")
+    parser.add_argument("--bullet", help="Custom bullet character (default: '-')")
+    parser.add_argument("--dry-run", action="store_true", help="Preview without posting")
+    parser.add_argument("--stats", action="store_true", help="Show conversion statistics")
+
+    args = parser.parse_args()
+
+    # Load Tana configuration
+    config = load_config()
+    info("Tana configuration loaded")
+
+    # Read input content
+    if args.file:
+        input_path = Path(args.file)
+        if not input_path.exists():
+            error(f"File not found: {args.file}")
+        with open(input_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        info(f"Content read from: {args.file}")
+    elif args.content:
+        content = args.content
+    else:
+        # Read from stdin
+        info("Reading content from stdin...")
+        content = sys.stdin.read()
+
+    if not content.strip():
+        error("No content to post")
+
+    # Convert content to Tana format
+    try:
+        tana_content = convert_markdown_to_tana(content, args)
+
+        # Show statistics
+        if args.stats:
+            original_lines = len(content.splitlines())
+            original_words = len(content.split())
+            converted_lines = len(tana_content.splitlines())
+            converted_nodes = tana_content.count('-')
+
+            print(f"\n{Colors.BLUE}📊 Conversion Statistics:{Colors.END}")
+            print(f"  Original: {original_lines} lines, {original_words} words")
+            print(f"  Converted: {converted_lines} lines, {converted_nodes} nodes")
+            print(f"  Target: {args.node}")
+
+    except Exception as e:
+        error(f"Content conversion failed: {e}")
+
+    # Post to Tana
+    info(f"Posting to Tana node: {args.node}")
+
+    if post_to_tana(args.node, tana_content, config, args.dry_run):
+        if not args.dry_run:
+            success(f"Content successfully posted to node: {args.node}")
+            if args.node.upper() == "INBOX":
+                info("Check your Tana inbox to see the new content")
+
+if __name__ == "__main__":
+    main()

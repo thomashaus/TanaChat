@@ -1,0 +1,211 @@
+name: 🚀 Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Build and push Docker images
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push API image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: api
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Web image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./TanaChat/app
+        file: ./TanaChat/app/Dockerfile
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/www:${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Deploy to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to DigitalOcean App Platform
+      uses: digitalocean/app_action@main
+      with:
+        app_name: tanachat-staging
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:main-${{ github.sha }}
+
+    - name: Wait for deployment
+      run: |
+        echo "⏳ Waiting for staging deployment to be ready..."
+        sleep 60
+
+    - name: Health check
+      run: |
+        curl -f ${{ secrets.STAGING_API_URL }}/api/health || {
+          echo "❌ Staging health check failed"
+          exit 1
+        }
+        echo "✅ Staging deployment healthy"
+
+    - name: Run smoke tests
+      run: |
+        # Basic smoke tests against staging
+        curl -f ${{ secrets.STAGING_API_URL }}/api/health
+        curl -f ${{ secrets.STAGING_WEB_URL }}
+
+  # Deploy to production (manual approval required)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [build-and-push, deploy-staging]
+    if: github.event.inputs.environment == 'production'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to DigitalOcean App Platform
+      uses: digitalocean/app_action@main
+      with:
+        app_name: tanachat-production
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:main-${{ github.sha }}
+
+    - name: Wait for deployment
+      run: |
+        echo "⏳ Waiting for production deployment to be ready..."
+        sleep 120
+
+    - name: Health check
+      run: |
+        curl -f ${{ secrets.PRODUCTION_API_URL }}/api/health || {
+          echo "❌ Production health check failed"
+          exit 1
+        }
+        echo "✅ Production deployment healthy"
+
+    - name: Run smoke tests
+      run: |
+        # Basic smoke tests against production
+        curl -f ${{ secrets.PRODUCTION_API_URL }}/api/health
+        curl -f ${{ secrets.PRODUCTION_WEB_URL }}
+
+  # Update documentation
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate API documentation
+      run: |
+        # Generate OpenAPI documentation
+        curl -o api/docs/latest.json ${{ secrets.STAGING_API_URL }}/openapi.json
+
+    - name: Commit updated docs
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add api/docs/
+        git diff --staged --quiet || git commit -m "📚 Update API documentation [skip ci]"
+        git push
+
+  # Notify team of deployment
+  notify:
+    name: Notify Team
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: always() && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Notify Slack on success
+      if: needs.deploy-staging.result == 'success'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        channel: '#deployments'
+        text: |
+          🚀 TanaChat deployed to staging successfully!
+          Commit: ${{ github.sha }}
+          API: ${{ secrets.STAGING_API_URL }}
+          Web: ${{ secrets.STAGING_WEB_URL }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify Slack on failure
+      if: needs.deploy-staging.result == 'failure'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#deployments'
+        text: |
+          ❌ TanaChat staging deployment failed!
+          Commit: ${{ github.sha }}
+          Please check the logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

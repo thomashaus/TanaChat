@@ -1,0 +1,65 @@
+name: Gitleaks Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # Fetch full history for complete scan
+        fetch-depth: 0
+
+    - name: Run Gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      with:
+        version: latest
+
+    # Optional: Upload scan results as artifacts
+    - name: Upload Gitleaks report
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gitleaks-report
+        path: gitleaks-report.json
+        retention-days: 30
+
+  # Additional job to prevent force pushes that bypass gitleaks
+  protect-main:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check for force push
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          # Get the previous commit on main
+          PREV_COMMIT=$(git rev-parse HEAD~1)
+
+          # Check if this was a force push (commits don't match parent)
+          if ! git merge-base --is-ancestor $PREV_COMMIT HEAD; then
+            echo "⚠️ Force push detected to main branch"
+            echo "Running full gitleaks scan on all changes..."
+
+            # Run comprehensive scan
+            gitleaks detect --source . --verbose --exit-code
+          fi
+        fi

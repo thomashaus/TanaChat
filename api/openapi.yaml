@@ -1,0 +1,694 @@
+openapi: 3.0.3
+info:
+  title: TanaChat.ai API
+  description: |
+    ## Overview
+
+    The TanaChat.ai API provides comprehensive integration with Tana, allowing users to:
+
+    * **Validate and Upload**: Validate Tana JSON export files and upload them to secure storage
+    * **File Management**: List, retrieve, and delete Tana files with full metadata tracking
+    * **Spaces Integration**: Manage DigitalOcean Spaces storage with user-scoped access
+    * **Authentication**: Secure JWT-based authentication system
+
+    ## Tana Integration
+
+    This API supports both Tana Intermediate Format and Tagr Export Format JSON files.
+    Files are automatically validated, analyzed for supertags, and stored with rich metadata
+    including node counts, date ranges, and supertag usage statistics.
+
+    ## Authentication
+
+    All endpoints except `/validate` and `/health` require JWT authentication.
+    Include the token in the Authorization header: `Bearer <your-jwt-token>`
+
+    ## Rate Limiting
+
+    * File uploads are limited to 100MB
+    * All operations are user-scoped for security
+
+  version: 0.1.0
+  contact:
+    name: TanaChat.ai Support
+    url: https://tanachat.ai
+    email: hello@tanachat.ai
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.tanachat.ai
+    description: Production server
+  - url: http://localhost:8000
+    description: Development server
+
+tags:
+  - name: Health
+    description: Health check and system status endpoints
+  - name: Authentication
+    description: JWT token management and user authentication
+  - name: Tana
+    description: Tana file validation, upload, and management operations
+  - name: Spaces
+    description: DigitalOcean Spaces storage and connectivity management
+
+paths:
+  /:
+    get:
+      tags:
+        - Health
+      summary: Root endpoint
+      description: Returns basic API information
+      operationId: root
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: TanaChat.ai API
+                  version:
+                    type: string
+                    example: 0.1.0
+                  docs:
+                    type: string
+                    example: /docs
+
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Check if the API is running and configured
+      operationId: health_check
+      responses:
+        '200':
+          description: Healthy response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: 0.1.0
+                  spaces_configured:
+                    type: boolean
+                    description: Whether DigitalOcean Spaces is configured
+
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login and get JWT token
+      description: Authenticate with username/password and receive JWT token
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: Username
+                  example: user@example.com
+                password:
+                  type: string
+                  description: Password
+                  example: password123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    description: JWT access token
+                  token_type:
+                    type: string
+                    example: bearer
+                  expires_in:
+                    type: integer
+                    description: Token expiry time in seconds
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/validate:
+    post:
+      tags:
+        - Tana
+      summary: Validate Tana JSON file
+      description: Validate a Tana JSON export file without storing it. No authentication required.
+      operationId: validate_tana_file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Tana JSON export file (.json)
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TanaValidationResult'
+        '422':
+          description: Invalid file format or validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/upload:
+    post:
+      tags:
+        - Tana
+      summary: Upload Tana JSON file
+      description: Validate and upload a Tana JSON export file to DigitalOcean Spaces. Authentication required.
+      operationId: upload_tana_file
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Tana JSON export file (.json, max 100MB)
+      responses:
+        '200':
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TanaImportMetadata'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid file or validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Upload failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/files:
+    get:
+      tags:
+        - Tana
+      summary: List Tana files
+      description: List all Tana files for the authenticated user. Authentication required.
+      operationId: list_tana_files
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FileInfo'
+                  count:
+                    type: integer
+                    description: Number of files
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to list files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/files/{file_id}:
+    get:
+      tags:
+        - Tana
+      summary: Get Tana file
+      description: Download a specific Tana file by ID. Authentication required.
+      operationId: get_tana_file
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File ID
+      responses:
+        '200':
+          description: File content
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to retrieve file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/files/{file_id}/meta:
+    get:
+      tags:
+        - Tana
+      summary: Get Tana file metadata
+      description: Get metadata for a specific Tana import. Authentication required.
+      operationId: get_tana_metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File ID
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TanaImportMetadata'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Metadata not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to retrieve metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tana/files/{file_id}:
+    delete:
+      tags:
+        - Tana
+      summary: Delete Tana file
+      description: Delete a Tana file and its metadata. Authentication required.
+      operationId: delete_tana_file
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: File ID
+      responses:
+        '200':
+          description: File deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: File deleted successfully
+                  file_id:
+                    type: string
+                    description: ID of deleted file
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to delete file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/spaces/status:
+    get:
+      tags:
+        - Spaces
+      summary: Check Spaces connectivity
+      description: Check DigitalOcean Spaces connectivity status. Authentication required.
+      operationId: spaces_status
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Spaces status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                    description: Whether Spaces is connected
+                  bucket:
+                    type: string
+                    description: Spaces bucket name
+                  region:
+                    type: string
+                    description: Spaces region
+                  endpoint:
+                    type: string
+                    description: Spaces endpoint URL
+                  error:
+                    type: string
+                    description: Error message if not connected
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/spaces/list:
+    get:
+      tags:
+        - Spaces
+      summary: List Spaces files
+      description: List files in the user's DigitalOcean Space. Authentication required.
+      operationId: list_spaces_files
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: prefix
+          in: query
+          required: false
+          schema:
+            type: string
+            default: ""
+          description: Prefix to filter files
+      responses:
+        '200':
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                          description: File key in Spaces
+                        size:
+                          type: integer
+                          description: File size in bytes
+                        last_modified:
+                          type: string
+                          format: date-time
+                          description: Last modified timestamp
+                        url:
+                          type: string
+                          description: File URL
+                  prefix:
+                    type: string
+                    description: Requested prefix
+                  user_prefix:
+                    type: string
+                    description: User-scoped prefix used for security
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to list files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Spaces not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Error description
+          example: Request failed
+
+    TanaValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: Whether the file is valid
+        error:
+          type: string
+          description: Error message if invalid
+        version:
+          type: string
+          description: Tana file version
+        node_count:
+          type: integer
+          description: Number of nodes in file
+        supertag_count:
+          type: integer
+          description: Number of supertags found
+        supertags:
+          type: array
+          items:
+            type: string
+          description: List of supertag names found
+
+    SupertagInfo:
+      type: object
+      properties:
+        uid:
+          type: string
+          description: Supertag UID
+        name:
+          type: string
+          description: Supertag name
+        count:
+          type: integer
+          description: Number of nodes using this supertag
+
+    TanaImportMetadata:
+      type: object
+      properties:
+        file_id:
+          type: string
+          description: UUID for this import
+        original_filename:
+          type: string
+          description: Original filename
+        username:
+          type: string
+          description: User who uploaded the file
+        import_timestamp:
+          type: string
+          format: date-time
+          description: When the file was imported
+        total_nodes:
+          type: integer
+          description: Total number of nodes
+        top_level_nodes:
+          type: integer
+          description: Number of top-level nodes
+        leaf_nodes:
+          type: integer
+          description: Number of leaf nodes
+        calendar_nodes:
+          type: integer
+          description: Number of calendar nodes
+        fields_count:
+          type: integer
+          description: Number of fields
+        supertags:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupertagInfo'
+          description: Supertags found in the file
+        oldest_node_date:
+          type: string
+          format: date-time
+          description: Oldest node creation date
+        newest_node_date:
+          type: string
+          format: date-time
+          description: Newest node creation date
+        file_size_bytes:
+          type: integer
+          description: File size in bytes
+        spaces_path:
+          type: string
+          description: Path in DigitalOcean Spaces
+
+    FileInfo:
+      type: object
+      properties:
+        file_id:
+          type: string
+          description: File ID
+        original_filename:
+          type: string
+          description: Original filename
+        username:
+          type: string
+          description: Owner username
+        file_size_bytes:
+          type: integer
+          description: File size in bytes
+        spaces_path:
+          type: string
+          description: Path in Spaces
+        upload_timestamp:
+          type: string
+          format: date-time
+          description: Upload timestamp
+        last_modified:
+          type: string
+          description: Last modified timestamp from Spaces
+        url:
+          type: string
+          description: File URL
+        metadata:
+          $ref: '#/components/schemas/TanaImportMetadata'
+          description: File metadata if available
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

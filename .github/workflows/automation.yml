@@ -1,0 +1,304 @@
+name: 🤖 Automation
+
+on:
+  issues:
+    types: [opened, closed, labeled, unlabeled]
+  pull_request:
+    types: [opened, closed, ready_for_review, synchronize]
+  pull_request_review:
+    types: [submitted, dismissed]
+  schedule:
+    # Run daily at 8 AM UTC
+    - cron: '0 8 * * *'
+
+jobs:
+  # Issue management
+  issue-management:
+    name: Issue Management
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+
+    steps:
+    - name: Add triage label
+      if: github.event.action == 'opened'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            labels: ['needs-triage']
+          })
+
+    - name: Welcome new contributors
+      if: github.event.action == 'opened' && github.event.issue.user.type == 'User'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const author = issue.user.login;
+
+          // Check if this is the user's first issue
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            creator: author,
+            state: 'all'
+          });
+
+          if (issues.length === 1) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🎉 Hi @${author}! Thanks for opening your first issue in TanaChat!\n\n📚 **Helpful Resources:**\n- [Contributing Guide](https://github.com/thomashaus/TanaChat/blob/main/.github/CONTRIBUTING.md)\n- [Documentation](https://github.com/thomashaus/TanaChat/blob/main/README.md)\n- [Code of Conduct](https://github.com/thomashaus/TanaChat/blob/main/.github/CODE_OF_CONDUCT.md)\n\n💡 **Next Steps:**\n1. Please ensure your issue follows our issue templates\n2. Add any relevant labels if needed\n3. Feel free to ask questions in the comments\n\nWe'll review your issue soon. Thanks for contributing! 🙏`
+            });
+          }
+
+    - name: Remove needs-triage label
+      if: github.event.action == 'labeled' && contains(github.event.label.name, 'priority:')
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.removeLabel({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            name: 'needs-triage'
+          });
+
+  # Pull request management
+  pr-management:
+    name: Pull Request Management
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: Add labels based on files changed
+      if: github.event.action == 'opened' || github.event.action == 'synchronize'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number
+          });
+
+          const labels = new Set();
+
+          // Analyze changed files to determine appropriate labels
+          for (const file of files) {
+            const filename = file.filename;
+
+            if (filename.startsWith('api/')) {
+              labels.add('api');
+            }
+            if (filename.startsWith('TanaChat/app/')) {
+              labels.add('frontend');
+            }
+            if (filename.startsWith('mcp/')) {
+              labels.add('mcp');
+            }
+            if (filename.startsWith('bin/')) {
+              labels.add('cli');
+            }
+            if (filename.startsWith('.github/')) {
+              labels.add('infrastructure');
+            }
+            if (filename.startsWith('docs/')) {
+              labels.add('documentation');
+            }
+            if (filename.includes('requirements') || filename.includes('package.json')) {
+              labels.add('dependencies');
+            }
+            if (filename.includes('tana') || filename.includes('workspace')) {
+              labels.add('tana-integration');
+            }
+          }
+
+          // Add appropriate labels
+          if (labels.size > 0) {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: Array.from(labels)
+            });
+          }
+
+    - name: Welcome new contributors
+      if: github.event.action == 'opened' && github.event.pull_request.user.type == 'User'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const pr = context.payload.pull_request;
+          const author = pr.user.login;
+
+          // Check if this is the user's first PR
+          const { data: prs } = await github.rest.pulls.list({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            creator: author,
+            state: 'all'
+          });
+
+          if (prs.length === 1) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🎉 Hi @${author}! Thanks for opening your first pull request to TanaChat!\n\n📋 **Review Checklist:**\n- [ ] Code follows our [contributing guidelines](https://github.com/thomashaus/TanaChat/blob/main/.github/CONTRIBUTING.md)\n- [ ] Tests are included and passing\n- [ ] Documentation is updated if needed\n- [ ] PR description is complete and clear\n\n🏷️ **Next Steps:**\n1. Automated tests will run shortly\n2. We'll review your changes and provide feedback\n3. Address any review comments\n4. Once approved, your PR will be merged\n\n💬 **Questions?**\nFeel free to ask in the comments or start a [discussion](https://github.com/thomashaus/TanaChat/discussions).\n\nThanks for your contribution! 🙏`
+            });
+          }
+
+    - name: Request review based on PR content
+      if: github.event.action == 'opened'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number
+          });
+
+          let reviewer = 'thomashaus'; // Default reviewer
+
+          // You could implement more sophisticated reviewer selection here
+          // based on file patterns, expertise, etc.
+
+          // Request review
+          await github.rest.pulls.requestReviewers({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+            reviewers: [reviewer]
+          });
+
+  # Repository maintenance
+  maintenance:
+    name: Repository Maintenance
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Close stale issues
+      uses: actions/stale@v8
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        stale-issue-message: |
+          ⚠️ This issue has been inactive for 30 days and will be closed automatically.
+
+          If you're still experiencing this issue or believe it should remain open:
+          1. Add a comment explaining why
+          2. Provide any additional information
+          3. Relevant maintainers will review
+
+          Thank you for your understanding! 🙏
+        stale-pr-message: |
+          ⚠️ This pull request has been inactive for 14 days and will be marked as stale.
+
+          If you're still working on this:
+          1. Push new commits or add a comment
+          2. Update the PR description if needed
+          3. Address any review comments
+
+          Thank you for your contribution! 🙏
+        days-before-issue-stale: 30
+        days-before-pr-stale: 14
+        days-before-issue-close: 7
+        days-before-pr-close: 7
+        exempt-issue-labels: "priority: critical,priority: high,security,bug"
+        exempt-pr-labels: "priority: critical,priority: high,security,bug"
+        stale-issue-label: "stale"
+        stale-pr-label: "stale"
+
+    - name: Update project statistics
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // Get repository statistics
+          const { data: repo } = await github.rest.repos.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo
+          });
+
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'all',
+            per_page: 1
+          });
+
+          const { data: pulls } = await github.rest.pulls.list({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'all',
+            per_page: 1
+          });
+
+          console.log(`📊 Repository Statistics:`);
+          console.log(`⭐ Stars: ${repo.stargazers_count}`);
+          console.log(`🍴 Forks: ${repo.forks_count}`);
+          console.log(`👀 Watchers: ${repo.watchers_count}`);
+          console.log(`🐛 Issues: ${repo.open_issues_count} open / ${issues.length} total`);
+          console.log(`🔄 Pull Requests: ${repo.open_issues_count - repo.open_issues_count} open / ${pulls.length} total`);
+
+  # Label management
+  label-management:
+    name: Label Management
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Sync labels
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // This would sync labels with the configuration in .github/settings.yml
+          // Implementation would depend on your specific needs
+          console.log('🏷️ Label management completed');
+
+  # Milestone tracking
+  milestone-tracking:
+    name: Milestone Tracking
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Update milestone progress
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // Get all milestones
+          const { data: milestones } = await github.rest.issues.listMilestones({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open'
+          });
+
+          for (const milestone of milestones) {
+            // Get issues and PRs for this milestone
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              milestone: milestone.number,
+              state: 'all'
+            });
+
+            const openIssues = issues.filter(issue => issue.state === 'open' && !issue.pull_request);
+            const closedIssues = issues.filter(issue => issue.state === 'closed' && !issue.pull_request);
+            const openPRs = issues.filter(issue => issue.state === 'open' && issue.pull_request);
+            const mergedPRs = issues.filter(issue => issue.state === 'closed' && issue.pull_request && issue.merged);
+
+            const progress = Math.round(((closedIssues.length + mergedPRs.length) / issues.length) * 100);
+
+            console.log(`📋 Milestone: ${milestone.title}`);
+            console.log(`   📊 Progress: ${progress}%`);
+            console.log(`   🐛 Issues: ${closedIssues.length}/${openIssues.length + closedIssues.length} closed`);
+            console.log(`   🔄 PRs: ${mergedPRs.length}/${openPRs.length + mergedPRs.length} merged`);
+
+            // You could update the milestone description here if needed
+          }

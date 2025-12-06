@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""
+Tana Create User - Create a new TanaChat.ai user
+
+Usage: tana-createuser [options]
+"""
+
+import sys
+import argparse
+import getpass
+from pathlib import Path
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import UserManager, Colors
+
+
+def prompt_for_input(prompt, required=True, default=None):
+    """Prompt user for input with validation"""
+    while True:
+        if default:
+            full_prompt = f"{prompt} [{default}]: "
+        else:
+            full_prompt = f"{prompt}: "
+
+        try:
+            value = input(full_prompt).strip()
+            if not value and default:
+                value = default
+            if not value and required:
+                Colors.warning(f"This field is required.")
+                continue
+            return value
+        except KeyboardInterrupt:
+            Colors.error("\nOperation cancelled by user")
+
+
+def confirm_action(message):
+    """Ask for user confirmation"""
+    while True:
+        response = input(f"{message} [y/N]: ").strip().lower()
+        if response in ['y', 'yes']:
+            return True
+        elif response in ['n', 'no', '']:
+            return False
+        Colors.warning("Please enter 'y' or 'n'")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Create a new TanaChat.ai user",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-createuser                                    # Interactive mode
+  tana-createuser --name "John Doe" --username john    # Non-interactive mode
+  tana-createuser --config user.json                   # Create from config file
+
+The script will:
+1. Create a user record in ./files/metadata/users.json
+2. Generate a JWT token for API/MCP access
+3. Create user directories in ./files/users/[username]/
+4. Store Tana API key for workspace integration
+5. Generate a secure password if not provided
+        """
+    )
+
+    parser.add_argument("--name", help="User's full name")
+    parser.add_argument("--username", help="Username for login")
+    parser.add_argument("--email", help="User's email address")
+    parser.add_argument("--tana-key", help="Tana API key")
+    parser.add_argument("--password", help="Password (will prompt if not provided)")
+    parser.add_argument("--config", help="Load user data from JSON config file")
+    parser.add_argument("--files-dir", help="Custom files directory (default: ./files)")
+    parser.add_argument("--non-interactive", action="store_true",
+                       help="Run in non-interactive mode")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Show what would be created without creating")
+
+    args = parser.parse_args()
+
+    # Initialize UserManager
+    if args.files_dir:
+        user_manager = UserManager(Path(args.files_dir))
+    else:
+        user_manager = UserManager()
+
+    # Load from config file if provided
+    if args.config:
+        config_path = Path(args.config)
+        if not config_path.exists():
+            Colors.error(f"Config file not found: {args.config}")
+
+        import json
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except json.JSONDecodeError as e:
+            Colors.error(f"Invalid JSON in config file: {e}")
+
+        # Use config values, command line args take precedence
+        args.name = args.name or config.get('name')
+        args.username = args.username or config.get('username')
+        args.email = args.email or config.get('email')
+        args.tana_key = args.tana_key or config.get('tana_key')
+        args.password = args.password or config.get('password')
+
+    # Interactive or batch mode
+    if args.non_interactive and not all([args.name, args.username, args.email, args.tana_key]):
+        Colors.error("Non-interactive mode requires all fields: --name, --username, --email, --tana-key")
+
+    # Collect user information
+    print(f"{Colors.CYAN}👤 Create New TanaChat.ai User{Colors.END}\n")
+
+    user_data = {
+        'name': args.name,
+        'username': args.username,
+        'email': args.email,
+        'tana_key': args.tana_key,
+        'password': args.password
+    }
+
+    # Interactive prompts for missing fields
+    if not args.non_interactive:
+        if not user_data['name']:
+            user_data['name'] = prompt_for_input("Full name")
+
+        if not user_data['username']:
+            # Validate username
+            while True:
+                username = prompt_for_input("Username (alphanumeric, underscore, hyphen only)")
+                if user_manager.get_user(username):
+                    Colors.warning(f"Username '{username}' already exists")
+                    continue
+                # Simple validation
+                import re
+                if not re.match(r'^[a-zA-Z0-9_-]+$', username):
+                    Colors.warning("Username must contain only alphanumeric characters, underscores, and hyphens")
+                    continue
+                user_data['username'] = username
+                break
+
+        if not user_data['email']:
+            # Validate email
+            import re
+            while True:
+                email = prompt_for_input("Email address")
+                if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+                    Colors.warning("Please enter a valid email address")
+                    continue
+                user_data['email'] = email
+                break
+
+        if not user_data['tana_key']:
+            user_data['tana_key'] = prompt_for_input("Tana API key")
+
+        if not user_data['password']:
+            # Generate password or prompt
+            if confirm_action("Generate secure password automatically?"):
+                import secrets
+                user_data['password'] = secrets.token_urlsafe(16)
+            else:
+                user_data['password'] = getpass.getpass("Password: ")
+                if len(user_data['password']) < 8:
+                    Colors.warning("Password should be at least 8 characters long")
+                    confirm = confirm_action("Continue with short password?")
+                    if not confirm:
+                        return
+    else:
+        # Non-interactive mode - validate email format
+        if user_data['email']:
+            import re
+            if not re.match(r'^[^@]+@[^@]+\.[^@]+$', user_data['email']):
+                Colors.error("Invalid email address format")
+
+    # Show summary
+    print(f"\n{Colors.BLUE}📋 User Summary:{Colors.END}")
+    print(f"  Name: {Colors.BOLD}{user_data['name']}{Colors.END}")
+    print(f"  Username: {Colors.BOLD}{user_data['username']}{Colors.END}")
+    print(f"  Email: {user_data['email']}")
+    print(f"  Tana API Key: {user_data['tana_key'][:20]}...")
+    if args.password or user_data['password']:
+        print(f"  Password: {'*' * len(user_data['password'])}")
+
+    files_dir_msg = args.files_dir if args.files_dir else "./files"
+    print(f"  Files Directory: {files_dir_msg}")
+
+    # Dry run mode
+    if args.dry_run:
+        print(f"\n{Colors.YELLOW}🔍 DRY RUN - No changes made{Colors.END}")
+        print(f"  Would create user in: {user_manager.users_file}")
+        return
+
+    # Confirm creation
+    if not args.non_interactive and not args.dry_run:
+        print(f"\n{Colors.CYAN}Create this user?{Colors.END}")
+        if not confirm_action("Proceed with user creation?"):
+            Colors.info("User creation cancelled")
+            return
+
+    # Create the user
+    print(f"\n{Colors.BLUE}🚀 Creating user...{Colors.END}")
+
+    try:
+        result = user_manager.create_user(
+            name=user_data['name'],
+            username=user_data['username'],
+            email=user_data['email'],
+            tana_api_key=user_data['tana_key'],
+            password=user_data['password']
+        )
+
+        # Success message
+        print(f"\n{Colors.GREEN}✅ User created successfully!{Colors.END}")
+        print(f"\n{Colors.CYAN}📌 Important Information:{Colors.END}")
+
+        if 'password' in result:
+            print(f"  Password: {Colors.YELLOW}{result['password']}{Colors.END}")
+            print(f"  {Colors.RED}Save this password now - it won't be shown again!{Colors.END}")
+
+        user_info = result['user']
+        print(f"  Username: {user_info['username']}")
+        print(f"  JWT Token: {user_info['jwt_token'][:50]}...")
+
+        print(f"\n{Colors.BLUE}📁 Files Created:{Colors.END}")
+        print(f"  User metadata: {user_manager.users_file}")
+
+        print(f"\n{Colors.GREEN}🎯 Next Steps:{Colors.END}")
+        print(f"  1. Test login: tana-login {user_info['username']}")
+        print(f"  2. Configure MCP with JWT token")
+        print(f"  3. Set up Tana API integration")
+
+    except Exception as e:
+        Colors.error(f"Failed to create user: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

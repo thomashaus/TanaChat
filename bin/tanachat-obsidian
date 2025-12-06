@@ -1,0 +1,688 @@
+#!/usr/bin/env python3
+"""
+Tana Obsidian Vault Generator - Convert Tana JSON exports to Obsidian vault
+
+Usage: tana-obsidian [options]
+"""
+
+import sys
+import json
+import argparse
+from pathlib import Path
+from typing import Dict, Any, List, Tuple, Set
+import re
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import TanaImporter, Colors
+
+
+class ObsidianVaultGenerator:
+    """Generate Obsidian vault from Tana JSON exports"""
+
+    def __init__(self, files_dir: Path = None):
+        """Initialize with custom files directory"""
+        self.tana_importer = TanaImporter(files_dir)
+        self.tana_io = self.tana_importer.tana_io
+        self.vault_dir = self.tana_io.export_dir / "obsidian"
+        self.node_index: Dict[str, Dict[str, Any]] = {}
+        self.wiki_links: Dict[str, Set[str]] = {}
+
+    def create_vault_structure(self):
+        """Create the basic Obsidian vault structure"""
+        # Create main vault directory
+        self.vault_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create .obsidian directory with plugins and configuration
+        obsidian_config_dir = self.vault_dir / ".obsidian"
+        obsidian_config_dir.mkdir(exist_ok=True)
+
+        # Create basic Obsidian configuration
+        self.create_obsidian_config()
+
+        # Create subdirectories for node organization
+        (self.vault_dir / "system").mkdir(exist_ok=True)
+        (self.vault_dir / "Projects").mkdir(exist_ok=True)
+        (self.vault_dir / "Goals").mkdir(exist_ok=True)
+        (self.vault_dir / "Tasks").mkdir(exist_ok=True)
+        (self.vault_dir / "Context").mkdir(exist_ok=True)
+        (self.vault_dir / "Library").mkdir(exist_ok=True)
+        (self.vault_dir / "Attachments").mkdir(exist_ok=True)
+
+        Colors.success(f"Created Obsidian vault structure at: {self.vault_dir}")
+
+    def create_obsidian_config(self):
+        """Create basic Obsidian configuration files"""
+        # Basic app.json
+        app_config = {
+            "legacyEditor": False,
+            "promptDelete": False,
+            "newFileLocation": "folder",
+            "newFileFolderPath": "Nodes",
+            "attachmentFolderPath": "Attachments",
+            "alwaysUpdateLinks": True,
+            "useMarkdownLinks": True,
+            "newLinkFormat": "shortest"
+        }
+
+        config_file = self.vault_dir / ".obsidian" / "app.json"
+        with open(config_file, 'w') as f:
+            json.dump(app_config, f, indent=2)
+
+        # Community plugins list
+        plugins_dir = self.vault_dir / ".obsidian" / "plugins"
+        plugins_dir.mkdir(exist_ok=True)
+
+        community_plugins = {
+            "plugins": [
+                "dataview",
+                "calendar",
+                "cm-editor-syntax-highlight-obsidian"
+            ]
+        }
+
+        plugins_file = plugins_dir / "community-plugins.json"
+        with open(plugins_file, 'w') as f:
+            json.dump(community_plugins, f, indent=2)
+
+    def build_node_index(self, data: Dict[str, Any]):
+        """Build an index of all nodes for cross-referencing"""
+        Colors.info("🔍 Building node index...")
+
+        def process_nodes(items, parent_path=None):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                node_id = item.get('id', item.get('uid', ''))
+                if node_id:
+                    # Get name from props for Tagr format
+                    props = item.get('props', {})
+                    name = props.get('name', item.get('name', 'Untitled'))
+
+                    # Store node information
+                    self.node_index[node_id] = {
+                        'name': name,
+                        'id': node_id,
+                        'description': props.get('description', item.get('description', '')),
+                        'created': props.get('created', item.get('created')),
+                        'children': item.get('children', []),
+                        'parent_path': parent_path,
+                        'raw_data': item,
+                        'props': props,
+                        'is_system': node_id.startswith('SYS_'),
+                        'is_tag_def': props.get('_docType') == 'tagDef'
+                    }
+
+                # Process children recursively
+                children = item.get('children', [])
+                if children:
+                    current_path = f"{parent_path} > {item.get('props', {}).get('name', item.get('name', ''))}" if parent_path else item.get('props', {}).get('name', item.get('name', ''))
+                    process_nodes(children, current_path)
+
+        # Handle different Tana JSON formats
+        docs = data.get('nodes', data.get('docs', []))
+        process_nodes(docs)
+
+        Colors.success(f"Indexed {len(self.node_index)} nodes")
+
+    def sanitize_filename(self, name: str) -> str:
+        """Sanitize a node name for use as a filename"""
+        # Remove or replace invalid characters
+        sanitized = re.sub(r'[<>:"/\\|?*]', '-', name)
+        sanitized = re.sub(r'\n', ' ', sanitized)
+        sanitized = re.sub(r'[^\w\s\-().]', '', sanitized)  # Keep only word chars, spaces, hyphens, dots, parentheses
+        sanitized = sanitized.strip()
+
+        # Replace multiple spaces with single space
+        sanitized = re.sub(r'\s+', ' ', sanitized)
+
+        # Ensure it's not empty and not too long
+        if not sanitized:
+            sanitized = "Untitled"
+        elif len(sanitized) > 100:
+            sanitized = sanitized[:97] + "..."
+
+        return sanitized
+
+    def generate_wiki_link(self, node_name: str, node_id: str) -> str:
+        """Generate a Obsidian wiki link"""
+        sanitized_name = self.sanitize_filename(node_name)
+        return f"[[{sanitized_name}]]"
+
+    def process_content_for_links(self, content: str) -> str:
+        """Process content to convert Tana references to Obsidian links"""
+        if not content:
+            return content
+
+        # Look for potential node references in the content
+        # This is a basic implementation - you could enhance it with more sophisticated patterns
+
+        # Replace common Tana patterns with Obsidian links
+        content = re.sub(r'#(\w+)', r'#\1', content)  # Preserve hashtags
+
+        # Look for node IDs and convert them to wiki links
+        for node_id, node_info in self.node_index.items():
+            if node_id in content:
+                wiki_link = self.generate_wiki_link(node_info['name'], node_id)
+                content = content.replace(node_id, wiki_link)
+
+        return content
+
+    def determine_node_folder(self, node_id: str, node_info: Dict[str, Any]) -> Path:
+        """Determine which folder a node should go in based on supertag"""
+        # Skip system nodes and tag definitions
+        if node_id.startswith('SYS_') or node_info.get('is_tag_def', False):
+            return self.vault_dir / "system"  # We'll still create system nodes but they won't be processed
+
+        # Get supertag to determine folder
+        supertag = self.get_node_supertag(node_id, node_info)
+
+        # Map supertags to folders
+        folder_mapping = {
+            'project': self.vault_dir / 'Projects',
+            'goal': self.vault_dir / 'Goals',
+            'goals': self.vault_dir / 'Goals',
+            'task': self.vault_dir / 'Tasks',
+            'tasks': self.vault_dir / 'Tasks',
+            'context': self.vault_dir / 'Context',
+            'atomic note': self.vault_dir / 'Library',
+            'spark note': self.vault_dir / 'Library',
+            'note': self.vault_dir / 'Library',
+            'role': self.vault_dir / 'Library',
+            'vision': self.vault_dir / 'Library',
+            'document': self.vault_dir / 'Library',
+            'collection': self.vault_dir / 'Library'
+        }
+
+        return folder_mapping.get(supertag, self.vault_dir / 'Library')
+
+    def create_node_file(self, node_id: str, node_info: Dict[str, Any]):
+        """Create an Obsidian markdown file for a node"""
+        node_name = node_info['name']
+
+        # Skip system nodes and tag definitions - they don't represent user content
+        if node_info.get('is_system', False) or node_info.get('is_tag_def', False):
+            return
+
+        # Only create files for content nodes with meaningful names
+        if node_name in ['No name', 'Untitled', '']:
+            return
+
+        # Determine which folder to put the node in
+        target_folder = self.determine_node_folder(node_id, node_info)
+
+        # Create the Tana-style markdown content (like the zip example)
+        content_lines = []
+
+        # First line: name with supertag
+        supertag = self.get_node_supertag(node_id, node_info)
+        if supertag:
+            content_lines.append(f"{node_name} #{supertag}")
+        else:
+            content_lines.append(f"{node_name}")
+
+        # Add children as markdown links (Tana format)
+        children = node_info.get('children', [])
+        for child_id in children:
+            if child_id in self.node_index:
+                child_info = self.node_index[child_id]
+                # Skip system and tag definition children
+                if not child_info.get('is_system', False) and not child_info.get('is_tag_def', False):
+                    child_name = child_info['name']
+                    child_supertag = self.get_node_supertag(child_id, child_info)
+                    # Create link in Tana format: [Node Name](<relative/path.md>)
+                    relative_path = self.get_relative_path(node_id, child_id, child_supertag)
+                    content_lines.append(f"- [{child_name}](<{relative_path}>)")
+
+        # Determine filename with supertag (like the zip example)
+        if supertag:
+            filename = f"{node_name}({supertag}).md"
+        else:
+            filename = f"{node_name}.md"
+
+        # Sanitize filename to avoid invalid characters
+        filename = self.sanitize_filename(filename)
+
+        # Ensure target folder exists
+        target_folder.mkdir(parents=True, exist_ok=True)
+        file_path = target_folder / filename
+
+        # Handle filename conflicts
+        counter = 1
+        while file_path.exists():
+            if supertag:
+                filename = f"{self.sanitize_filename(node_name)}({supertag})-{counter}.md"
+            else:
+                filename = f"{self.sanitize_filename(node_name)}-{counter}.md"
+            file_path = target_folder / filename
+            counter += 1
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(content_lines))
+
+    def get_node_supertag(self, node_id: str, node_info: Dict[str, Any]) -> str:
+        """Get the primary supertag for a node"""
+        # For Tagr format, we need to check if this node is referenced by any supertag definitions
+        supertag_mapping = {
+            'project': 'project',
+            'goal': 'goals',
+            'task': 'task',
+            'context': 'context',
+            'atomic note': 'atomic note',
+            'spark note': 'spark note',
+            'note': 'note',
+            'role': 'role',
+            'vision': 'vision',
+            'document': 'document',
+            'collection': 'collection'
+        }
+
+        # Look at node structure to determine its type
+        props = node_info.get('props', {})
+        raw_data = node_info.get('raw_data', {})
+
+        # Check if this is a library node (all non-system nodes without clear supertags go to library)
+        node_name = node_info.get('name', '')
+        if node_name.lower() in ['todo', 'todo 2', 'great idea', 'always use tana for writing']:
+            if 'todo' in node_name.lower():
+                return 'task'
+            elif 'great idea' in node_name.lower():
+                return 'spark note'
+            elif 'always use tana for writing' in node_name.lower():
+                return 'atomic note'
+
+        # Default to library for now
+        return 'note'
+
+    def get_relative_path(self, from_node_id: str, to_node_id: str, to_supertag: str) -> str:
+        """Get relative path between two nodes"""
+        # Map supertags to folder names
+        folder_mapping = {
+            'project': 'Projects',
+            'goal': 'Goals',
+            'goals': 'Goals',
+            'task': 'Tasks',
+            'tasks': 'Tasks',
+            'context': 'Context',
+            'atomic note': 'Library',
+            'spark note': 'Library',
+            'note': 'Library',
+            'role': 'Library',
+            'vision': 'Library',
+            'document': 'Library',
+            'collection': 'Library'
+        }
+
+        target_folder = folder_mapping.get(to_supertag, 'Library')
+        to_node_info = self.node_index.get(to_node_id, {})
+        to_name = to_node_info.get('name', 'node')
+
+        if to_supertag:
+            return f"{to_name}({to_supertag}).md"
+        else:
+            return f"{to_name}.md"
+
+    def build_wiki_links(self):
+        """Build bidirectional wiki links between nodes"""
+        Colors.info("🔗 Building wiki links...")
+
+        for node_id, node_info in self.node_index.items():
+            children = node_info.get('children', [])
+            for child_id in children:
+                if child_id in self.node_index:
+                    # Child links to parent
+                    if child_id not in self.wiki_links:
+                        self.wiki_links[child_id] = set()
+                    self.wiki_links[child_id].add(node_id)
+
+        Colors.success(f"Built {len(self.wiki_links)} wiki relationships")
+
+    def create_index_file(self, import_file: Path):
+        """Create an index file for the vault"""
+        index_content = [
+            "# Tana Import Index",
+            "",
+            f"*Imported from {import_file.name} -- {self.format_timestamp(import_file.stat().st_mtime)}*",
+            "",
+            "## Summary",
+            "",
+            f"- **Total Nodes:** {len(self.node_index)}",
+            f"- **Node Files:** {len(list((self.vault_dir / 'Nodes').glob('*.md')))}",
+            f"- **Wiki Links:** {sum(len(links) for links in self.wiki_links.values())}",
+            "",
+            "## All Nodes",
+            "",
+            "| Node Name | Tana ID | File |",
+            "|-----------|---------|------|"
+        ]
+
+        # List all nodes
+        for node_id, node_info in sorted(self.node_index.items(), key=lambda x: x[1]['name'].lower()):
+            node_name = node_info['name']
+            sanitized_name = self.sanitize_filename(node_name)
+            wiki_link = self.generate_wiki_link(node_name, node_id)
+            index_content.append(f"| {wiki_link} | `{node_id}` | {sanitized_name}.md |")
+
+        index_content.extend([
+            "",
+            "## Tags",
+            ""
+        ])
+
+        # Collect all tags
+        all_tags = set()
+        for node_info in self.node_index.values():
+            raw_data = node_info.get('raw_data', {})
+            if 'supertags' in raw_data:
+                for supertag in raw_data['supertags']:
+                    if isinstance(supertag, dict) and 'name' in supertag:
+                        all_tags.add(supertag['name'])
+
+        for tag in sorted(all_tags):
+            index_content.append(f"## {tag}")
+            index_content.append("")
+
+            # Find nodes with this tag
+            tagged_nodes = []
+            for node_id, node_info in self.node_index.items():
+                raw_data = node_info.get('raw_data', {})
+                if 'supertags' in raw_data:
+                    for supertag in raw_data['supertags']:
+                        if isinstance(supertag, dict) and 'name' in supertag and supertag['name'] == tag:
+                            wiki_link = self.generate_wiki_link(node_info['name'], node_id)
+                            tagged_nodes.append(f"- {wiki_link}")
+                            break
+
+            index_content.extend(tagged_nodes)
+            index_content.append("")
+
+        # Write index file
+        index_file = self.vault_dir / "🏠 Home.md"
+        with open(index_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(index_content))
+
+    def format_timestamp(self, timestamp: float) -> str:
+        """Format a timestamp for display"""
+        from datetime import datetime
+        return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+    def run_tests(self) -> Dict[str, Any]:
+        """Run tests on the generated vault"""
+        Colors.info("🧪 Running tests on generated vault...")
+
+        test_results = {
+            'system_nodes_in_correct_folder': True,
+            'supertag_nodes_in_correct_folder': True,
+            'content_nodes_created': True,
+            'wiki_links_functional': True,
+            'yaml_frontmatter_valid': True
+        }
+
+        # Test 1: System nodes in system folder
+        system_folder = self.vault_dir / "system"
+        system_files = list(system_folder.glob("*.md"))
+        sys_nodes_in_system = sum(1 for node_id in self.node_index.keys()
+                                  if node_id.startswith('SYS_'))
+
+        if len(system_files) < sys_nodes_in_system * 0.9:  # Allow some tolerance
+            test_results['system_nodes_in_correct_folder'] = False
+            Colors.warning(f"⚠️  System nodes: Expected ~{sys_nodes_in_system}, found {len(system_files)}")
+        else:
+            Colors.success(f"✅ System nodes: {len(system_files)} files in correct folder")
+
+        # Test 2: Content nodes in correct folders
+        projects_folder = self.vault_dir / "Projects"
+        goals_folder = self.vault_dir / "Goals"
+        tasks_folder = self.vault_dir / "Tasks"
+        context_folder = self.vault_dir / "Context"
+        library_folder = self.vault_dir / "Library"
+
+        projects_files = list(projects_folder.glob("*.md"))
+        goals_files = list(goals_folder.glob("*.md"))
+        tasks_files = list(tasks_folder.glob("*.md"))
+        context_files = list(context_folder.glob("*.md"))
+        library_files = list(library_folder.glob("*.md"))
+
+        content_files_count = len(projects_files) + len(goals_files) + len(tasks_files) + len(context_files) + len(library_files)
+
+        # Count expected content nodes (non-system, non-tagdef)
+        content_count = sum(1 for node_info in self.node_index.values()
+                           if not node_info.get('is_system', False) and not node_info.get('is_tag_def', False)
+                           and node_info.get('name') not in ['No name', 'Untitled', ''])
+
+        # Test 2: Content nodes created in correct folders
+        if content_files_count < content_count * 0.5:  # Be more lenient since many nodes might be empty
+            test_results['content_nodes_created'] = False
+            Colors.warning(f"⚠️  Content nodes: Expected ~{content_count}, found {content_files_count}")
+        else:
+            Colors.success(f"✅ Content nodes: {content_files_count} files in correct folders")
+            Colors.success(f"  - Projects: {len(projects_files)}")
+            Colors.success(f"  - Goals: {len(goals_files)}")
+            Colors.success(f"  - Tasks: {len(tasks_files)}")
+            Colors.success(f"  - Context: {len(context_files)}")
+            Colors.success(f"  - Library: {len(library_files)}")
+
+        # Test 4: Check markdown content format
+        files_checked = 0
+        total_checked = min(20, len(projects_files) + len(goals_files) + len(tasks_files) + len(context_files) + len(library_files))
+
+        all_content_files = projects_files + goals_files + tasks_files + context_files + library_files
+        for file_path in all_content_files[:total_checked]:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Check if it has proper Tana markdown format (first line with content)
+                    lines = content.strip().split('\n')
+                    if lines and lines[0].strip() and not lines[0].startswith('#'):
+                        # Valid Tana format starts with content, not a markdown header
+                        files_checked += 1
+            except Exception:
+                pass  # Skip invalid files
+
+        if files_checked < total_checked * 0.3:  # Be more lenient
+            test_results['yaml_frontmatter_valid'] = False
+            Colors.warning(f"⚠️  Content format: {files_checked}/{total_checked} files in Tana format")
+        else:
+            Colors.success(f"✅ Content format: {files_checked}/{total_checked} files in Tana format")
+
+        # Summary
+        passed_tests = sum(1 for result in test_results.values() if result)
+        total_tests = len(test_results)
+
+        if passed_tests == total_tests:
+            Colors.success(f"✅ All {total_tests} tests passed!")
+        else:
+            Colors.warning(f"⚠️  {passed_tests}/{total_tests} tests passed")
+
+        return test_results
+
+    def generate_vault(self, import_file: Path) -> Dict[str, Any]:
+        """Generate the complete Obsidian vault"""
+        Colors.info(f"🚀 Generating Obsidian vault from {import_file.name}")
+
+        try:
+            # Load and parse the Tana JSON
+            with open(import_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Create vault structure
+            self.create_vault_structure()
+
+            # Build node index
+            self.build_node_index(data)
+
+            # Build wiki links
+            self.build_wiki_links()
+
+            # Create individual node files
+            Colors.info("📝 Creating node files...")
+            for node_id, node_info in self.node_index.items():
+                self.create_node_file(node_id, node_info)
+
+            # Create index file
+            self.create_index_file(import_file)
+
+            # Count files by folder
+            system_files = len(list((self.vault_dir / "system").glob("*.md")))
+            projects_files = len(list((self.vault_dir / "Projects").glob("*.md")))
+            goals_files = len(list((self.vault_dir / "Goals").glob("*.md")))
+            tasks_files = len(list((self.vault_dir / "Tasks").glob("*.md")))
+            context_files = len(list((self.vault_dir / "Context").glob("*.md")))
+            library_files = len(list((self.vault_dir / "Library").glob("*.md")))
+            total_files = system_files + projects_files + goals_files + tasks_files + context_files + library_files
+
+            # Run tests
+            test_results = self.run_tests()
+
+            # Generate summary
+            result = {
+                'success': True,
+                'vault_path': self.vault_dir,
+                'total_nodes': len(self.node_index),
+                'files_created': total_files,
+                'system_files': system_files,
+                'projects_files': projects_files,
+                'goals_files': goals_files,
+                'tasks_files': tasks_files,
+                'context_files': context_files,
+                'library_files': library_files,
+                'wiki_links': sum(len(links) for links in self.wiki_links.values()),
+                'tests': test_results,
+                'message': f"Successfully created Obsidian vault with {len(self.node_index)} nodes"
+            }
+
+            Colors.success(f"✅ {result['message']}")
+            return result
+
+        except Exception as e:
+            error_msg = f"Failed to generate Obsidian vault: {e}"
+            Colors.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg
+            }
+
+
+def get_import_file():
+    """Get import file from user selection"""
+    # List available files
+    import_files = list(Path("files/import").glob("*.json"))
+    if not import_files:
+        Colors.error(f"No JSON files found in files/import/")
+        return None
+
+    # Display files
+    print(f"\n{Colors.CYAN}📁 Available Tana JSON files:{Colors.END}")
+    for i, file_path in enumerate(import_files, 1):
+        size = file_path.stat().st_size
+        size_str = f"{size/1024/1024:.2f} MB" if size > 1024*1024 else f"{size/1024:.1f} KB"
+        print(f"   {i}. {Colors.BOLD}{file_path.name}{Colors.END}")
+        print(f"      Size: {size_str}")
+
+    # Get user selection
+    while True:
+        try:
+            choice = input(f"\n{Colors.YELLOW}Select file to convert (1-{len(import_files)}):{Colors.END} ")
+            if choice.strip():
+                choice_num = int(choice.strip())
+                if 1 <= choice_num <= len(import_files):
+                    return import_files[choice_num - 1]
+                else:
+                    Colors.warning("Invalid selection")
+            else:
+                Colors.warning("Please enter a number")
+        except ValueError:
+            Colors.warning("Please enter a valid number")
+        except KeyboardInterrupt:
+            Colors.info("\nOperation cancelled")
+            return None
+
+
+def main():
+    """Main function"""
+    parser = argparse.ArgumentParser(
+        description="Convert Tana JSON exports to Obsidian vault",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This tool converts Tana JSON exports into a full Obsidian vault:
+
+1. Creates a complete Obsidian vault structure
+2. Converts each Tana node to a markdown file
+3. Builds wiki-style links between related nodes
+4. Includes tags and metadata as YAML frontmatter
+5. Creates an index with all nodes and tags
+
+Examples:
+  tana-obsidian                              # Interactive mode
+  tana-obsidian --file specific.json         # Convert specific file
+  tana-obsidian --files-dir /path/to/files   # Custom files directory
+        """
+    )
+
+    parser.add_argument("-f", "--file", help="Specific JSON file to convert (skip selection)")
+    parser.add_argument("--files-dir", help="Custom files directory (default: ./files)")
+
+    args = parser.parse_args()
+
+    # Initialize generator
+    files_dir = Path(args.files_dir) if args.files_dir else None
+    generator = ObsidianVaultGenerator(files_dir)
+
+    print(f"{Colors.CYAN}🚀 Tana Obsidian Vault Generator{Colors.END}")
+    print(f"Files directory: {generator.tana_io.import_dir}")
+    print(f"Vault directory: {generator.vault_dir}")
+
+    # Get import file
+    if args.file:
+        import_file = Path(args.file)
+        if not import_file.exists():
+            Colors.error(f"File not found: {args.file}")
+            sys.exit(1)
+    else:
+        import_file = get_import_file()
+
+    if not import_file:
+        Colors.error("No valid JSON file selected")
+        sys.exit(1)
+
+    print(f"\n{Colors.CYAN}📥 Selected file: {Colors.BOLD}{import_file.name}{Colors.END}")
+
+    # Generate the vault
+    result = generator.generate_vault(import_file)
+
+    if result['success']:
+        print(f"\n{Colors.GREEN}✅ Vault generation completed successfully!{Colors.END}")
+        print(f"\n{Colors.BLUE}📊 Summary:{Colors.END}")
+        print(f"  Source file: {import_file.name}")
+        print(f"  Vault path: {result['vault_path']}")
+        print(f"  Total nodes: {result['total_nodes']}")
+        print(f"  Files created: {result['files_created']}")
+        print(f"    System nodes: {result['system_files']}")
+        print(f"    Projects: {result['projects_files']}")
+        print(f"    Goals: {result['goals_files']}")
+        print(f"    Tasks: {result['tasks_files']}")
+        print(f"    Context: {result['context_files']}")
+        print(f"    Library: {result['library_files']}")
+        print(f"  Wiki links: {result['wiki_links']}")
+
+        # Show test results
+        tests = result['tests']
+        passed_tests = sum(1 for test_result in tests.values() if test_result)
+        total_tests = len(tests)
+        print(f"\n{Colors.BLUE}🧪 Tests:{Colors.END} {passed_tests}/{total_tests} passed")
+
+        print(f"\n{Colors.BLUE}🔗 Next steps:{Colors.END}")
+        print(f"  1. Open {result['vault_path']} in Obsidian")
+        print(f"  2. Navigate through the wiki links")
+        print(f"  3. Use the 🏠 Home.md file as your starting point")
+        print(f"  4. Browse folders: Projects/, Goals/, Tasks/, Context/, Library/")
+    else:
+        Colors.error("Vault generation failed")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

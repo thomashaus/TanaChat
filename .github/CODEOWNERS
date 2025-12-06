@@ -1,0 +1,35 @@
+# TanaChat Codeowners
+
+# Default owner for all files
+* @thomashaus
+
+# Core service owners
+/app/ @thomashaus
+/api/ @thomashaus
+/mcp/ @thomashaus
+
+# Infrastructure and deployment
+/.github/ @thomashaus
+docker-compose*.yml @thomashaus
+Dockerfile* @thomashaus
+*.do.yaml @thomashaus
+
+# Documentation and specifications
+/docs/ @thomashaus
+README.md @thomashaus
+*.md @thomashaus
+
+# CLI tools and scripts
+/bin/ @thomashaus
+/scripts/ @thomashaus
+lib/ @thomashaus
+
+# Configuration files
+pyproject.toml @thomashaus
+requirements*.txt @thomashaus
+package*.json @thomashaus
+
+# Test files
+/tests/ @thomashaus
+**/test_*.py @thomashaus
+**/*.test.* @thomashaus

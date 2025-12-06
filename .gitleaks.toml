@@ -1,0 +1,21 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "s3-access-key"
+description = "S3 Access Key"
+regex = '''(?i)(s3_access_key|s3_key)\s*[=:]\s*['"]?[A-Z0-9]{20,}['"]?'''
+tags = ["key", "aws", "s3"]
+
+[[rules]]
+id = "s3-secret-key"
+description = "S3 Secret Key"
+regex = '''(?i)(s3_secret_key|s3_secret)\s*[=:]\s*['"]?[A-Za-z0-9/+=]{40,}['"]?'''
+tags = ["secret", "aws", "s3"]
+
+[allowlist]
+paths = [
+    '''\.env\.example$''',
+    '''\.env\.local\.example$''',
+    '''temp/''',
+]
