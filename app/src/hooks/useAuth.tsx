@@ -15,7 +15,11 @@ interface AuthState {
 
 interface AuthContextType extends AuthState {
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (username: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (
+    username: string,
+    email: string,
+    password: string
+  ) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -45,18 +49,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isLoading: false,
           isAuthenticated: true,
         });
-      } catch (error) {
+      } catch {
         // Invalid stored data, clear it
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
-        setState(prev => ({ ...prev, isLoading: false }));
+        setState((prev) => ({ ...prev, isLoading: false }));
       }
     } else {
-      setState(prev => ({ ...prev, isLoading: false }));
+      setState((prev) => ({ ...prev, isLoading: false }));
     }
   }, []);
 
-  const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (
+    username: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
@@ -70,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const errorData = await response.json();
         return {
           success: false,
-          error: errorData.detail || 'Login failed'
+          error: errorData.detail || 'Login failed',
         };
       }
 
@@ -78,10 +85,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Store token and user info
       localStorage.setItem('auth_token', data.access_token);
-      localStorage.setItem('auth_user', JSON.stringify({
-        username,
-        email: '', // We don't get email from login response
-      }));
+      localStorage.setItem(
+        'auth_user',
+        JSON.stringify({
+          username,
+          email: '', // We don't get email from login response
+        })
+      );
 
       setState({
         user: {
@@ -94,15 +104,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       return { success: true };
-    } catch (error) {
+    } catch {
       return {
         success: false,
-        error: 'Network error. Please try again.'
+        error: 'Network error. Please try again.',
       };
     }
   };
 
-  const register = async (username: string, email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const register = async (
+    username: string,
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -116,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const errorData = await response.json();
         return {
           success: false,
-          error: errorData.detail || 'Registration failed'
+          error: errorData.detail || 'Registration failed',
         };
       }
 
@@ -124,10 +138,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Store token and user info
       localStorage.setItem('auth_token', data.access_token);
-      localStorage.setItem('auth_user', JSON.stringify({
-        username,
-        email,
-      }));
+      localStorage.setItem(
+        'auth_user',
+        JSON.stringify({
+          username,
+          email,
+        })
+      );
 
       setState({
         user: {
@@ -140,10 +157,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       return { success: true };
-    } catch (error) {
+    } catch {
       return {
         success: false,
-        error: 'Network error. Please try again.'
+        error: 'Network error. Please try again.',
       };
     }
   };

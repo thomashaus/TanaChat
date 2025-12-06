@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 
 export function HealthDashboard() {
   const [logs, setLogs] = useState<string[]>([
-    "[SYSTEM] Initializing health check sequence...",
-    "[NETWORK] Connected to Tana API Gateway (v2.1.0)",
-    "[AUTH] Secure handshake established with Claude Protocol",
+    '[SYSTEM] Initializing health check sequence...',
+    '[NETWORK] Connected to Tana API Gateway (v2.1.0)',
+    '[AUTH] Secure handshake established with Claude Protocol',
   ]);
 
   useEffect(() => {
@@ -15,7 +15,7 @@ export function HealthDashboard() {
         `[${new Date().toLocaleTimeString()}] Optimizing vector embeddings...`,
       ];
       const randomLog = newLogs[Math.floor(Math.random() * newLogs.length)];
-      setLogs(prev => [randomLog, ...prev].slice(0, 8));
+      setLogs((prev) => [randomLog, ...prev].slice(0, 8));
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -82,7 +82,7 @@ export function HealthDashboard() {
             <div className="space-y-2">
               {logs.map((log, i) => (
                 <div key={i} className={`truncate ${i === 0 ? 'text-green-400' : 'text-gray-500'}`}>
-                  <span className="opacity-50 mr-2">{">"}</span>
+                  <span className="opacity-50 mr-2">{'>'}</span>
                   {log}
                 </div>
               ))}
@@ -94,22 +94,35 @@ export function HealthDashboard() {
   );
 }
 
-function StatusCard({ title, status, latency }: { title: string, status: 'online' | 'processing' | 'offline', latency: string }) {
+function StatusCard({
+  title,
+  status,
+  latency,
+}: {
+  title: string;
+  status: 'online' | 'processing' | 'offline';
+  latency: string;
+}) {
   const colors = {
     online: 'bg-green-500',
     processing: 'bg-yellow-500',
-    offline: 'bg-red-500'
+    offline: 'bg-red-500',
   };
 
   return (
     <div className="bg-tana-card border border-tana-border rounded-xl p-6 hover:border-gray-600 transition-colors group">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-gray-200">{title}</h3>
-        <div className={`w-2 h-2 rounded-full ${colors[status]} shadow-[0_0_10px_rgba(0,0,0,0.5)]`} style={{ boxShadow: `0 0 10px var(--tw-shadow-color)` }}></div>
+        <div
+          className={`w-2 h-2 rounded-full ${colors[status]} shadow-[0_0_10px_rgba(0,0,0,0.5)]`}
+          style={{ boxShadow: `0 0 10px var(--tw-shadow-color)` }}
+        ></div>
       </div>
       <div className="flex items-end justify-between">
         <div className="text-xs text-tana-muted uppercase tracking-wider">Latency</div>
-        <div className="text-2xl font-bold text-white group-hover:text-indigo-400 transition-colors">{latency}</div>
+        <div className="text-2xl font-bold text-white group-hover:text-indigo-400 transition-colors">
+          {latency}
+        </div>
       </div>
     </div>
   );
