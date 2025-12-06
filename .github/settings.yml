@@ -185,14 +185,14 @@ _environment_rules:
     reviewers: ["thomashaus"]
     wait_timer: 15
 
-# Webhooks
-_webhooks:
-  - url: "https://api.example.com/webhooks/github"
-    content_type: json
-    insecure_ssl: false
-    secret: ${{ secrets.WEBHOOK_SECRET }}
-    events:
-      - push
-      - pull_request
-      - issues
-      - release
+# Webhooks (commented out for public repo - configure when needed)
+# _webhooks:
+#   - url: "https://api.example.com/webhooks/github"
+#     content_type: json
+#     insecure_ssl: false
+#     secret: ${{ secrets.WEBHOOK_SECRET }}
+#     events:
+#       - push
+#       - pull_request
+#       - issues
+#       - release

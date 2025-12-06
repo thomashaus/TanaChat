@@ -30,7 +30,7 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: 'TanaChat/app/package-lock.json'
+        cache-dependency-path: 'app/package-lock.json'
 
     - name: Install Python dependencies
       run: |
@@ -42,7 +42,7 @@ jobs:
 
     - name: Install Node.js dependencies
       run: |
-        cd TanaChat/app
+        cd app
         npm ci
 
     - name: Lint Python code
@@ -54,7 +54,7 @@ jobs:
 
     - name: Lint TypeScript/JavaScript code
       run: |
-        cd TanaChat/app
+        cd app
         npm run lint || true
 
     - name: Security scan (Python)
@@ -135,16 +135,16 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: 'TanaChat/app/package-lock.json'
+        cache-dependency-path: 'app/package-lock.json'
 
     - name: Install dependencies
       run: |
-        cd TanaChat/app
+        cd app
         npm ci
 
     - name: Run tests
       run: |
-        cd TanaChat/app
+        cd app
         npm test -- --coverage --watchAll=false
 
     - name: Upload coverage
@@ -177,7 +177,7 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: 'TanaChat/app/package-lock.json'
+        cache-dependency-path: 'app/package-lock.json'
 
     - name: Install all dependencies
       run: |
@@ -187,7 +187,7 @@ jobs:
         pip install -r api/requirements.txt
         pip install -r mcp/requirements.txt
         pip install pytest pytest-asyncio
-        cd TanaChat/app && npm ci
+        cd app && npm ci
 
     - name: Build Docker images
       run: |

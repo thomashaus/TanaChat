@@ -74,7 +74,7 @@ updates:
 
   # Node.js dependencies
   - package-ecosystem: "npm"
-    directory: "/TanaChat/app"
+    directory: "/app"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -119,7 +119,7 @@ updates:
 
   # Docker base images for app
   - package-ecosystem: "docker"
-    directory: "/TanaChat/app"
+    directory: "/app"
     schedule:
       interval: "weekly"
       day: "tuesday"
