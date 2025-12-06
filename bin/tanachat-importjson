@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+Tana Import JSON - Import Tana JSON files and generate markdown exports
+
+Usage: tana-importjson [options]
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import TanaImporter, Colors
+
+
+def get_import_file(tana_io, specific_file=None):
+    """Get import file from user selection or parameter"""
+    if specific_file:
+        file_path = Path(specific_file)
+
+        # If relative path, check in import directory first
+        if not file_path.is_absolute():
+            import_dir_path = tana_io.import_dir / specific_file
+            if import_dir_path.exists():
+                file_path = import_dir_path
+
+        if not file_path.exists():
+            Colors.error(f"File not found: {specific_file}")
+            return None
+        return file_path
+
+    # List available files
+    import_files = list(tana_io.import_dir.glob("*.json"))
+    if not import_files:
+        Colors.error(f"No JSON files found in {tana_io.import_dir}")
+        return None
+
+    # Display files
+    print(f"\n{Colors.CYAN}📁 Available Tana JSON files:{Colors.END}")
+    for i, file_path in enumerate(import_files, 1):
+        size = file_path.stat().st_size
+        modified = file_path.stat().st_mtime
+        size_str = f"{size/1024/1024:.2f} MB" if size > 1024*1024 else f"{size/1024:.1f} KB"
+        mod_str = datetime.fromtimestamp(modified).strftime('%Y-%m-%d %H:%M')
+        print(f"   {i}. {Colors.BOLD}{file_path.name}{Colors.END}")
+        print(f"      Size: {size_str} | Modified: {mod_str}")
+
+    # Get user selection
+    while True:
+        try:
+            choice = input(f"\n{Colors.YELLOW}Select file to import (1-{len(import_files)}):{Colors.END} ")
+            if choice.strip():
+                choice_num = int(choice.strip())
+                if 1 <= choice_num <= len(import_files):
+                    return import_files[choice_num - 1]
+                else:
+                    Colors.warning("Invalid selection")
+            else:
+                Colors.warning("Please enter a number")
+        except ValueError:
+            Colors.warning("Please enter a valid number")
+        except KeyboardInterrupt:
+            Colors.info("\nOperation cancelled")
+            return None
+
+
+def main():
+    """Main function"""
+    parser = argparse.ArgumentParser(
+        description="Import Tana JSON files and generate markdown exports",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This tool imports Tana JSON files and generates markdown exports:
+
+1. Lists all JSON files in ./files/import/
+2. Lets you select which file to import
+3. Validates the file is a proper Tana JSON export
+4. Clears ./files/export/ directory (automatically removes all subdirectories and files)
+5. Creates SuperTags.md with all supertags and usage counts
+6. Creates Home.md with the root/home node information
+7. Creates directory structure for key supertags with individual markdown files
+8. Generates import-summary.md with detailed metrics and issues
+
+Examples:
+  tana-importjson                              # Interactive mode (auto-clears export)
+  tana-importjson --file specific.json         # Import specific file
+  tana-importjson --files-dir /path/to/files   # Custom files directory
+  tana-importjson --no-clear                   # Import without clearing export directory
+        """
+    )
+
+    parser.add_argument("-f", "--file", help="Specific JSON file to import (skip selection)")
+    parser.add_argument("--files-dir", help="Custom files directory (default: ./files)")
+    parser.add_argument("--no-clear", action="store_true", help="Don't clear export directory before importing")
+
+    args = parser.parse_args()
+
+    # Initialize Tana Importer
+    files_dir = Path(args.files_dir) if args.files_dir else None
+    importer = TanaImporter(files_dir)
+
+    print(f"{Colors.CYAN}🚀 Tana JSON Importer{Colors.END}")
+    print(f"Import directory: {importer.tana_io.import_dir}")
+    print(f"Export directory: {importer.tana_io.export_dir}")
+
+    # Clear export directory (unless disabled)
+    if not args.no_clear:
+        if importer.tana_io.export_dir.exists():
+            import shutil
+            shutil.rmtree(importer.tana_io.export_dir)
+            Colors.success("Export directory cleared")
+        else:
+            Colors.info("Export directory doesn't exist yet")
+
+    # Get import file
+    import_file = get_import_file(importer.tana_io, args.file)
+    if not import_file:
+        Colors.error("No valid JSON file selected")
+        sys.exit(1)
+
+    print(f"\n{Colors.CYAN}📥 Selected file: {Colors.BOLD}{import_file.name}{Colors.END}")
+
+    # Run the import
+    print(f"\n{Colors.YELLOW}🔍 Validating Tana JSON...{Colors.END}")
+
+    try:
+        result = importer.import_file(import_file, clear_export=not args.no_clear)
+
+        if not result['success']:
+            Colors.error("Import failed")
+            sys.exit(1)
+
+        # Display results
+        print(f"\n{Colors.GREEN}✅ Import completed successfully!{Colors.END}")
+        print(f"\n{Colors.BLUE}📊 Summary:{Colors.END}")
+        print(f"  Source file: {result['import_file'].name}")
+        print(f"  File size: {result['import_file'].stat().st_size:,} bytes")
+        print(f"  Supertags found: {result['supertags_found']}")
+        print(f"  KeyTags loaded: {result['keytags_loaded']}")
+        print(f"  Nodes processed: {result['nodes_processed']}")
+
+        # Check if there was content to export
+        if result['export_dir_exists']:
+            # There was content, show details
+            if result['nodes_processed'] > 0:
+                print(f"  Files created: SuperTags.md, Home.md, import-summary.md, {result['nodes_processed']} markdown files")
+            else:
+                print(f"  Files created: SuperTags.md, Home.md, import-summary.md")
+            print(f"  Export directory: {importer.tana_io.export_dir}")
+
+        # Show created directories
+        if result['nodes_by_supertag']:
+            print(f"\n{Colors.CYAN}📁 Created directories:{Colors.END}")
+            for supertag_name in sorted(result['nodes_by_supertag'].keys()):
+                node_count = len(result['nodes_by_supertag'][supertag_name])
+                dir_name = supertag_name.replace(' ', '-').lower()
+                print(f"  📂 {dir_name}/ ({node_count} files)")
+
+        # Show any issues
+        if result['issues']:
+            print(f"\n{Colors.YELLOW}⚠️  Issues detected:{Colors.END}")
+            for issue in result['issues']:
+                severity = issue.get('severity', 'INFO')
+                color = {"ERROR": Colors.RED, "WARNING": Colors.YELLOW, "INFO": Colors.BLUE}.get(severity, Colors.BLUE)
+                icon = {"ERROR": "❌", "WARNING": "⚠️", "INFO": "ℹ️"}.get(severity, "•")
+                print(f"  {color}{icon} {issue.get('message', '')}{Colors.END}")
+                if issue.get('details'):
+                    print(f"     {Colors.BLUE}*{issue['details']}*{Colors.END}")
+
+        # Show summary file location
+        if result['summary_file']:
+            print(f"\n{Colors.GREEN}📄 Import summary created: {result['summary_file'].name}{Colors.END}")
+        else:
+            print(f"\n{Colors.BLUE}ℹ️  No content to export - export directory left empty{Colors.END}")
+
+    except Exception as e:
+        Colors.error(f"Import failed: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    from datetime import datetime  # Import here for the get_import_file function
+    main()

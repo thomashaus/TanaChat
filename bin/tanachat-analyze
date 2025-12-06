@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+Tana Analyze - Analyze Tana workspace exports
+A portable tool that works with any Tana workspace.
+
+Usage: tana-analyze [options] export.json
+"""
+
+import json
+import sys
+import os
+import argparse
+from pathlib import Path
+from datetime import datetime
+from collections import defaultdict
+
+# ANSI color codes
+class Colors:
+    GREEN = '\033[92m'
+    BLUE = '\033[94m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+def error(msg):
+    print(f"{Colors.RED}❌ {msg}{Colors.END}")
+    sys.exit(1)
+
+def success(msg):
+    print(f"{Colors.GREEN}✅ {msg}{Colors.END}")
+
+def info(msg):
+    print(f"{Colors.BLUE}ℹ️  {msg}{Colors.END}")
+
+def warning(msg):
+    print(f"{Colors.YELLOW}⚠️  {msg}{Colors.END}")
+
+def load_export(export_file):
+    """Load and validate Tana export file"""
+    if not Path(export_file).exists():
+        error(f"Export file not found: {export_file}")
+
+    try:
+        with open(export_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Validate basic structure
+        if 'docs' not in data:
+            warning("Export may not be in expected format (no 'docs' field)")
+
+        return data
+    except json.JSONDecodeError as e:
+        error(f"Invalid JSON in export file: {e}")
+    except Exception as e:
+        error(f"Error reading export file: {e}")
+
+def analyze_workspace(data):
+    """Analyze Tana workspace structure and content"""
+    docs = data.get('docs', [])
+
+    # Basic statistics
+    stats = {
+        'total_nodes': len(docs),
+        'nodes_with_description': 0,
+        'nodes_with_children': 0,
+        'nodes_with_created': 0,
+        'nodes_with_modified': 0,
+        'unique_fields': set(),
+        'supertag_instances': 0,
+        'supertags': set(),
+        'node_types': defaultdict(int),
+        'date_range': {'earliest': None, 'latest': None}
+    }
+
+    # Detailed analysis
+    for doc in docs:
+        # Check for content
+        if doc.get('description'):
+            stats['nodes_with_description'] += 1
+
+        if doc.get('children'):
+            stats['nodes_with_children'] += 1
+            stats['node_types']['has_children'] += 1
+
+        if doc.get('created'):
+            stats['nodes_with_created'] += 1
+            created = doc['created']
+            if isinstance(created, (int, float)):
+                dt = datetime.fromtimestamp(created / 1000 if created > 1e12 else created)
+                if not stats['date_range']['earliest'] or dt < stats['date_range']['earliest']:
+                    stats['date_range']['earliest'] = dt
+                if not stats['date_range']['latest'] or dt > stats['date_range']['latest']:
+                    stats['date_range']['latest'] = dt
+
+        if doc.get('modified'):
+            stats['nodes_with_modified'] += 1
+            modified = doc['modified']
+            if isinstance(modified, (int, float)):
+                dt = datetime.fromtimestamp(modified / 1000 if modified > 1e12 else modified)
+                if not stats['date_range']['latest'] or dt > stats['date_range']['latest']:
+                    stats['date_range']['latest'] = dt
+
+        # Check for supertags
+        if 'supertags' in doc:
+            for supertag in doc['supertags']:
+                if isinstance(supertag, dict) and 'name' in supertag:
+                    stats['supertags'].add(supertag['name'])
+                    stats['supertag_instances'] += 1
+
+        # Check for fields
+        if 'fields' in doc:
+            for field_name in doc['fields'].keys():
+                stats['unique_fields'].add(field_name)
+
+    return stats
+
+def find_supertags(data):
+    """Discover all supertags in the workspace"""
+    supertags = set()
+
+    def traverse(obj):
+        if isinstance(obj, dict):
+            # Check for supertags
+            if 'supertags' in obj:
+                for supertag in obj['supertags']:
+                    if isinstance(supertag, dict) and 'name' in supertag:
+                        supertags.add(supertag['name'])
+
+            # Check for supertag definitions
+            if obj.get('type') == 'supertag' and 'name' in obj:
+                supertags.add(obj['name'])
+
+            # Recurse into all values
+            for value in obj.values():
+                traverse(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                traverse(item)
+
+    traverse(data)
+    return sorted(list(supertags))
+
+def analyze_content_patterns(data):
+    """Analyze content patterns and types"""
+    docs = data.get('docs', [])
+
+    patterns = {
+        'headings': defaultdict(int),
+        'lists': defaultdict(int),
+        'links': 0,
+        'code_blocks': 0,
+        'tasks': 0,
+        'journal_entries': 0,
+        'projects': 0,
+        'meetings': 0,
+        'notes': 0
+    }
+
+    for doc in docs:
+        content = doc.get('description', '')
+        name = doc.get('name', '')
+
+        # Analyze name and description
+        all_text = f"{name}\n{content}"
+
+        # Count patterns
+        patterns['headings']['h1'] += all_text.count('# ')
+        patterns['headings']['h2'] += all_text.count('## ')
+        patterns['headings']['h3'] += all_text.count('### ')
+
+        patterns['lists']['unordered'] += content.count('\n- ') + content.count('\n* ')
+        patterns['lists']['ordered'] += content.count('\n1. ')
+        patterns['lists']['total'] += patterns['lists']['unordered'] + patterns['lists']['ordered']
+
+        patterns['links'] += content.count('[') + content.count('http')
+        patterns['code_blocks'] += content.count('```')
+
+        patterns['tasks'] += content.count('[ ]') + content.count('[x]')
+
+        # Pattern detection
+        lower_content = content.lower()
+        if 'journal' in lower_content or 'daily' in lower_content:
+            patterns['journal_entries'] += 1
+        if 'project' in lower_content:
+            patterns['projects'] += 1
+        if 'meeting' in lower_content or 'agenda' in lower_content:
+            patterns['meetings'] += 1
+        if 'note' in lower_content or 'idea' in lower_content:
+            patterns['notes'] += 1
+
+    return patterns
+
+def format_file_size(size_bytes):
+    """Format file size in human readable format"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+def print_analysis_report(data, stats, patterns, export_path):
+    """Print comprehensive analysis report"""
+    file_size = export_path.stat().st_size
+
+    print(f"{Colors.CYAN}📊 TANA WORKSPACE ANALYSIS{Colors.END}")
+    print(f"{Colors.BLUE}Export file:{Colors.END} {export_path.name}")
+    print(f"{Colors.BLUE}Size:{Colors.END} {format_file_size(file_size)}")
+    print(f"{Colors.BLUE}Modified:{Colors.END} {datetime.fromtimestamp(export_path.stat().st_mtime):%Y-%m-%d %H:%M}")
+    print()
+
+    # Basic Statistics
+    print(f"{Colors.GREEN}📈 BASIC STATISTICS{Colors.END}")
+    print(f"  Total nodes: {stats['total_nodes']:,}")
+    print(f"  With descriptions: {stats['nodes_with_description']:,}")
+    print(f"  With children: {stats['nodes_with_children']:,}")
+    print(f"  With timestamps: {stats['nodes_with_modified']:,}")
+    print(f"  Unique fields: {len(stats['unique_fields']):,}")
+    print(f"  Supertag instances: {stats['supertag_instances']}")
+    print(f"  Unique supertags: {len(stats['supertags'])}")
+
+    # Date Range
+    if stats['date_range']['earliest'] and stats['date_range']['latest']:
+        print(f"  Date range: {stats['date_range']['earliest'].strftime('%Y-%m-%d')} to {stats['date_range']['latest'].strftime('%Y-%m-%d')}")
+    print()
+
+    # Supertags
+    if stats['supertags']:
+        print(f"{Colors.YELLOW}🏷️ SUPERTAGS (Top 10){Colors.END}")
+        # Sort by frequency
+        supertag_counts = defaultdict(int)
+        for doc in data.get('docs', []):
+            if 'supertags' in doc:
+                for supertag in doc['supertags']:
+                    if isinstance(supertag, dict) and 'name' in supertag:
+                        supertag_counts[supertag['name']] += 1
+
+        sorted_supertags = sorted(supertag_counts.items(), key=lambda x: x[1], reverse=True)
+        for i, (name, count) in enumerate(sorted_supertags[:10], 1):
+            print(f"  {i:2d}. {Colors.BOLD}{name}{Colors.END} ({count} nodes)")
+    print()
+
+    # Content Patterns
+    print(f"{Colors.BLUE}📝 CONTENT PATTERNS{Colors.END}")
+    print(f"  Headings: H1={patterns['headings']['h1']}, H2={patterns['headings']['h2']}, H3={patterns['headings']['h3']}")
+    print(f"  Lists: {patterns['lists']['total']} total (unordered: {patterns['lists']['unordered']}, ordered: {patterns['lists']['ordered']})")
+    print(f"  Links: {patterns['links']}")
+    print(f"  Code blocks: {patterns['code_blocks']}")
+    print(f"  Task items: {patterns['tasks']}")
+    print(f"  Journal entries: {patterns['journal_entries']}")
+    print(f"  Projects: {patterns['projects']}")
+    print(f"  Meetings: {patterns['meetings']}")
+    print(f"  Notes: {patterns['notes']}")
+
+    # Node Types
+    print(f"\n{Colors.CYAN}🔧 NODE TYPES{Colors.END}")
+    for node_type, count in stats['node_types'].items():
+        print(f"  {node_type}: {count}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze Tana workspace exports",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-analyze                            # Find and analyze latest export
+  tana-analyze export.json               # Analyze specific export
+  tana-analyze --exports                    # Show available exports
+  tana-analyze --export export.json --detailed  # Detailed analysis
+
+This tool provides insights into your Tana workspace structure, content patterns,
+and usage patterns without requiring any specific Tana configuration.
+        """
+    )
+
+    parser.add_argument("export_file", nargs="?", help="Path to Tana export JSON file")
+    parser.add_argument("--exports", action="store_true", help="List available export files")
+    parser.add_argument("--detailed", action="store_true", help="Show detailed node analysis")
+    parser.add_argument("--patterns", action="store_true", help="Show content pattern analysis")
+
+    args = parser.parse_args()
+
+    # List available exports
+    if args.exports:
+        possible_dirs = [
+            Path("Tana/Exports"),
+            Path("../Tana/Exports"),
+            Path("./exports"),
+            Path("../exports")
+        ]
+
+        print(f"{Colors.CYAN}🔍 SEARCHING FOR TANA EXPORTS...{Colors.END}")
+        found_any = False
+
+        for export_dir in possible_dirs:
+            if export_dir.exists():
+                exports = list(export_dir.glob("*.json"))
+                exports = [f for f in exports if not f.name.endswith("_with_todoist.json")]
+
+                if exports:
+                    found_any = True
+                    print(f"\n{Colors.BLUE}📁 {export_dir}:{Colors.END}")
+                    for export_file in sorted(exports, key=lambda f: f.stat().st_mtime, reverse=True):
+                        size = export_file.stat().st_mtime
+                        mod_time = datetime.fromtimestamp(size)
+                        print(f"  • {export_file.name} ({format_file_size(export_file.stat().st_size)}, {mod_time.strftime('%Y-%m-%d %H:%M')})")
+
+        if not found_any:
+            error("No Tana export files found in common directories")
+        return
+
+    # Find export file
+    if args.export_file:
+        export_path = Path(args.export_file)
+    else:
+        # Try common export directories
+        possible_dirs = [
+            Path("Tana/Exports"),
+            Path("../Tana/Exports"),
+            Path("./exports"),
+            Path("../exports")
+        ]
+
+        export_path = None
+        for export_dir in possible_dirs:
+            if export_dir.exists():
+                try:
+                    exports = list(export_dir.glob("*.json"))
+                    exports = [f for f in exports if not f.name.endswith("_with_todoist.json")]
+                    if exports:
+                        export_path = max(exports, key=lambda f: f.stat().st_mtime)
+                        break
+                except:
+                    continue
+
+        if not export_path:
+            error("No Tana export file found. Use --exports to see available files or specify the path.")
+
+    info(f"Analyzing: {export_path.name}")
+
+    # Load and analyze export
+    data = load_export(export_path)
+    stats = analyze_workspace(data)
+
+    if args.patterns:
+        patterns = analyze_content_patterns(data)
+        print_analysis_report(data, stats, patterns, export_path)
+    else:
+        print_analysis_report(data, stats, analyze_content_patterns(data), export_path)
+
+    success(f"Analysis complete for {stats['total_nodes']:,} nodes")
+
+if __name__ == "__main__":
+    main()

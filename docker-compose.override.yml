@@ -1,0 +1,36 @@
+# Override for development
+services:
+  localstack:
+    ports:
+      - "4566:4566"
+      - "8080:8080"  # LocalStack Web UI
+
+  www:
+    volumes:
+      - ./app/src:/app/src:ro
+      - ./app/public:/app/public:ro
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_DEV_MODE=true
+
+  api:
+    volumes:
+      - ./api/src:/app/src:ro
+    environment:
+      - DEBUG=true
+      - RELOAD=true
+
+  # LocalStack UI (dashboard)
+  localstack-ui:
+    image: localstack/localstack-ui
+    container_name: tanachat-localstack-ui
+    ports:
+      - "8081:80"
+    environment:
+      - API_ENDPOINT=http://localstack:4566
+    depends_on:
+      - localstack
+    networks:
+      - tanachat-network
+    profiles:
+      - ui

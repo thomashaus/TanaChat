@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {
+      "uid": "root",
+      "name": "Missing version",
+      "created": "2024-01-01T00:00:00.000Z",
+      "edited": "2024-01-01T00:00:00.000Z",
+      "type": "node"
+    }
+  ]
+}

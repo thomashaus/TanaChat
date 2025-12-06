@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+"""
+Tana KeyTags Manager - Manage supertag metadata for Tana imports
+
+Usage: tana-keytags <command> [options]
+
+Commands:
+  list      List current keytags from metadata
+  add       Add supertags to keytags.json
+  remove    Remove supertags from keytags.json
+  validate  Validate keytags against SuperTags.md
+
+Requires a valid Tana import to be completed first with tana-importjson
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import KeyTagsManager, Colors
+
+
+def cmd_list(args, manager):
+    """List current keytags"""
+    result = manager.list_keytags()
+
+    if not result['exists']:
+        Colors.error("No keytags file found")
+        return
+
+    print(f"{Colors.CYAN}🔑 Current KeyTags{Colors.END}")
+    print(f"File: {result['file_info']['path']}")
+    print(f"Last updated: {result['file_info']['created_at']}")
+    print(f"Source: {result['file_info']['source_file']}")
+
+    user_defined = result['user_defined']
+    system = result['system']
+
+    print(f"\n{Colors.BLUE}📋 User-defined KeyTags ({result['counts']['user_defined']}):{Colors.END}")
+    if user_defined:
+        print(f"{'Name':<20} {'Node ID':<15} {'Description'}")
+        print("-" * 60)
+        for tag_id, tag_data in user_defined.items():
+            name = tag_data.get('name', 'Unknown')
+            node_id = tag_data.get('node_id', 'Unknown')
+            desc = (tag_data.get('description', '')[:30] + '...') if tag_data.get('description') else ''
+            print(f"{name:<20} {node_id:<15} {desc}")
+    else:
+        print("  No user-defined keytags")
+
+    print(f"\n{Colors.YELLOW}🔧 System KeyTags ({result['counts']['system']}):{Colors.END}")
+    if system:
+        for tag_id, tag_data in system.items():
+            name = tag_data.get('name', 'Unknown')
+            print(f"  • {name} ({tag_id})")
+    else:
+        print("  No system keytags")
+
+
+def cmd_add(args, manager):
+    """Add supertags to keytags"""
+    if args.supertags:
+        # Add specific supertags
+        print(f"{Colors.CYAN}📥 Adding specific supertags: {', '.join(args.supertags)}{Colors.END}")
+        success, result = manager.add_specific_keytags(args.supertags)
+
+        if not success:
+            Colors.error(result['message'])
+            return
+
+        print(result['message'])
+
+        if result.get('added_count', 0) > 0:
+            Colors.success(f"✅ {result['added_count']} keytags added successfully")
+        else:
+            Colors.info("ℹ️  No new keytags were added")
+
+        if result.get('not_found_tags'):
+            Colors.warning(f"⚠️  Not found in export: {', '.join(result['not_found_tags'])}")
+
+        return
+
+    if args.from_export:
+        print(f"{Colors.CYAN}📥 Loading supertags from export...{Colors.END}")
+        success, result = manager.add_from_export()
+
+        if not success:
+            Colors.error(result['message'])
+            return
+
+        if result['added_count'] == 0:
+            Colors.success(result['message'])
+            return
+
+        print(f"Adding {result['added_count']} new keytags:")
+        for tag_id, tag_data in result['added_tags'].items():
+            print(f"  • {tag_data['name']} ({tag_id})")
+
+        if not args.yes:
+            response = input(f"\n{Colors.YELLOW}Add these keytags?{Colors.END} [y/N]: ")
+            if not response.lower().startswith('y'):
+                Colors.info("Operation cancelled")
+                return
+
+        # Re-run the add operation to actually save
+        success, result = manager.add_from_export()
+        if success:
+            Colors.success(f"Added {result['added_count']} keytags")
+        else:
+            Colors.error("Failed to save keytags")
+    else:
+        Colors.error("Manual addition not implemented yet. Use --from-export flag")
+
+
+def cmd_remove(args, manager):
+    """Remove supertags from keytags"""
+    if args.name:
+        # Remove specific supertag by name
+        success, message = manager.remove_keytag(args.name)
+
+        if not success:
+            Colors.error(message)
+            return
+
+        print(f"Removing: {args.name}")
+
+        if not args.yes:
+            response = input(f"{Colors.YELLOW}Remove this keytag?{Colors.END} [y/N]: ")
+            if not response.lower().startswith('y'):
+                Colors.info("Operation cancelled")
+                return
+
+        # Re-run the remove operation to actually save
+        success, message = manager.remove_keytag(args.name)
+        if success:
+            Colors.success(message)
+        else:
+            Colors.error("Failed to save keytags")
+
+    else:
+        # Interactive removal
+        options = manager.get_interactive_remove_options()
+        if not options:
+            Colors.warning("No user-defined keytags to remove")
+            return
+
+        print(f"{Colors.CYAN}🗑️  Select KeyTag to remove:{Colors.END}")
+        for i, (tag_id, name) in enumerate(options, 1):
+            print(f"  {i}. {name} ({tag_id})")
+
+        try:
+            choice = int(input(f"\n{Colors.YELLOW}Enter number to remove (0 to cancel):{Colors.END} "))
+            if choice == 0:
+                Colors.info("Operation cancelled")
+                return
+            if choice < 1 or choice > len(options):
+                Colors.error("Invalid selection")
+                return
+
+            tag_id, name = options[choice - 1]
+
+            print(f"Removing: {name} ({tag_id})")
+
+            response = input(f"{Colors.YELLOW}Remove this keytag?{Colors.END} [y/N]: ")
+            if not response.lower().startswith('y'):
+                Colors.info("Operation cancelled")
+                return
+
+            success, message = manager.remove_keytag(name)
+            if success:
+                Colors.success(message)
+            else:
+                Colors.error("Failed to save keytags")
+
+        except ValueError:
+            Colors.error("Invalid input")
+
+
+def cmd_validate(args, manager):
+    """Validate keytags against SuperTags.md"""
+    print(f"{Colors.CYAN}🔍 Validating KeyTags...{Colors.END}")
+
+    result = manager.validate_against_export()
+
+    if not result['valid']:
+        if 'error' in result:
+            Colors.error(result['error'])
+            return
+
+    print(f"\n{Colors.BLUE}📊 Validation Results:{Colors.END}")
+    print(f"  KeyTags: {result['keytags_count']} supertags")
+    print(f"  Export: {result['export_count']} supertags")
+    print(f"  Common: {result['common_count']} supertags")
+
+    # Issues found
+    issues = result['issues']
+    if result['missing_in_keytags']:
+        print(f"\n{Colors.YELLOW}⚠️  Supertags in export but not in KeyTags ({len(result['missing_in_keytags']):}):{Colors.END}")
+        for name in sorted(result['missing_in_keytags']):
+            print(f"  • {name}")
+
+    if result['extra_in_keytags']:
+        print(f"\n{Colors.YELLOW}ℹ️  Supertags in KeyTags but not in current export ({len(result['extra_in_keytags']):}):{Colors.END}")
+        for name in sorted(result['extra_in_keytags']):
+            print(f"  • {name}")
+
+    if issues == 0:
+        Colors.success("✅ All KeyTags are valid and match the export")
+    else:
+        Colors.warning(f"Found {issues} validation issues")
+        print(f"\n{Colors.BLUE}💡 Suggestions:{Colors.END}")
+        for suggestion in result['suggestions']:
+            print(f"  • {suggestion}")
+
+
+def main():
+    """Main function"""
+    # Create main parser
+    parser = argparse.ArgumentParser(
+        description="Tana KeyTags Manager - Manage supertag metadata",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-keytags list                                    # List current keytags
+  tana-keytags add --from-export                       # Add all supertags from export
+  tana-keytags remove "project"                        # Remove specific keytag
+  tana-keytags remove                                  # Interactive removal
+  tana-keytags validate                                # Validate against export
+
+Note: Requires a valid Tana import to be completed first with tana-importjson
+        """
+    )
+
+    parser.add_argument('--files-dir', help="Custom files directory (default: ./files)")
+    parser.add_argument('--yes', '-y', action='store_true', help="Skip confirmation prompts")
+
+    # Subparsers for commands
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # List command
+    subparsers.add_parser('list', help='List current keytags')
+
+    # Add command
+    add_parser = subparsers.add_parser('add', help='Add supertags to keytags')
+    add_parser.add_argument('supertags', nargs='*', help='Specific supertag names to add')
+    add_parser.add_argument('--from-export', action='store_true',
+                           help='Add all supertags from SuperTags.md export')
+
+    # Remove command
+    remove_parser = subparsers.add_parser('remove', help='Remove supertags from keytags')
+    remove_parser.add_argument('--name', help='Specific supertag name to remove')
+
+    # Validate command
+    subparsers.add_parser('validate', help='Validate keytags against SuperTags.md')
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Check if command was provided
+    if not args.command:
+        Colors.error("Usage: tana-keytags <command> [options]")
+        Colors.info("Commands: list, add, remove, validate")
+        Colors.info("Use 'tana-keytags <command> --help' for command-specific help")
+        print(f"\n{Colors.YELLOW}Note: A valid Tana import must be completed first with tana-importjson{Colors.END}")
+        sys.exit(1)
+
+    # Initialize KeyTags Manager
+    files_dir = Path(args.files_dir) if args.files_dir else None
+    manager = KeyTagsManager(files_dir)
+
+    # Check for prerequisite files
+    if args.command != 'list' and not manager.keytags_file.exists():
+        Colors.error(f"KeyTags file not found: {manager.keytags_file}")
+        Colors.info("Please run tana-importjson first to create the keytags.json file")
+        sys.exit(1)
+
+    if args.command in ['add', 'validate']:
+        export_dir = manager.files_dir / "export"
+        supertags_file = export_dir / "SuperTags.md"
+        if not supertags_file.exists():
+            Colors.error(f"SuperTags.md not found: {supertags_file}")
+            Colors.info("Please run tana-importjson first to create the SuperTags.md file")
+            sys.exit(1)
+
+    # Execute command
+    if args.command == 'list':
+        cmd_list(args, manager)
+    elif args.command == 'add':
+        cmd_add(args, manager)
+    elif args.command == 'remove':
+        cmd_remove(args, manager)
+    elif args.command == 'validate':
+        cmd_validate(args, manager)
+    else:
+        Colors.error(f"Unknown command: {args.command}")
+        Colors.info("Available commands: list, add, remove, validate")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

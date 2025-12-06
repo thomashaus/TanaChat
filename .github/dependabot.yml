@@ -1,0 +1,179 @@
+# Dependabot configuration for TanaChat
+version: 2
+updates:
+
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "📦 deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      # Group production dependencies
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+      # Group development dependencies
+      development-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+
+  # Python dependencies in API
+  - package-ecosystem: "pip"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:30"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "📦 deps(api)"
+    labels:
+      - "dependencies"
+      - "python"
+      - "api"
+
+  # Python dependencies in MCP
+  - package-ecosystem: "pip"
+    directory: "/mcp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "📦 deps(mcp)"
+    labels:
+      - "dependencies"
+      - "python"
+      - "mcp"
+
+  # Node.js dependencies
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:30"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "📦 deps(frontend)"
+    labels:
+      - "dependencies"
+      - "javascript"
+      - "frontend"
+    groups:
+      # Group by update type
+      patch-updates:
+        update-types:
+          - "version-update:semver-patch"
+      minor-updates:
+        update-types:
+          - "version-update:semver-minor"
+
+  # Docker base images
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "🐳 deps(docker)"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  # Docker base images for app
+  - package-ecosystem: "docker"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:30"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "🐳 deps(docker-app)"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "1"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "🔧 deps(github-actions)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Terraform (if any)
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "thomashaus"
+    assignees:
+      - "thomashaus"
+    commit-message:
+      prefix: "🏗️ deps(terraform)"
+    labels:
+      - "dependencies"
+      - "terraform"
+    allow:
+      - dependency-type: "direct"
+    ignore:
+      # Ignore major version updates for stability
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

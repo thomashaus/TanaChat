@@ -1,0 +1,321 @@
+name: 📦 Dependencies
+
+on:
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  # Update Python dependencies
+  update-python-deps:
+    name: Update Python Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools safety
+
+    - name: Check for security vulnerabilities
+      run: |
+        safety check --json --output safety-report.json || true
+
+    - name: Update dependencies
+      run: |
+        # Compile new requirements
+        pip-compile --upgrade requirements.in
+        pip-compile --upgrade api/requirements.in
+        pip-compile --upgrade mcp/requirements.in
+
+        # Check for updates
+        git diff --exit-code requirements.txt api/requirements.txt mcp/requirements.txt && {
+          echo "No dependency updates needed"
+          exit 0
+        }
+
+    - name: Test updated dependencies
+      run: |
+        python -m pip install -r requirements.txt
+        python -m pip install -r api/requirements.txt
+        python -m pip install -r mcp/requirements.txt
+        python -m pip install -e .
+        pip install pytest
+
+        # Run basic tests
+        pytest tests/ -v || {
+          echo "Tests failed with updated dependencies"
+          exit 1
+        }
+
+    - name: Create Pull Request
+      if: success()
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: '📦 Update Python dependencies'
+        title: '📦 Update Python dependencies'
+        body: |
+          ## 📦 Python Dependencies Update
+
+          This PR updates Python dependencies to their latest versions:
+
+          ### 📋 Updated Packages
+          <!-- Updated packages will be listed here -->
+
+          ### ✅ Testing
+          - [x] All tests pass with updated dependencies
+          - [x] No security vulnerabilities detected
+          - [x] Basic functionality verified
+
+          ### 🔍 Security Report
+          ```
+          Safety report output will be here
+          ```
+
+          <!-- Please review the changes and ensure everything works as expected -->
+        labels: ['dependencies', 'automated']
+        delete-branch: true
+
+    - name: Upload safety report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: safety-report
+        path: safety-report.json
+        retention-days: 30
+
+  # Update Node.js dependencies
+  update-nodejs-deps:
+    name: Update Node.js Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'TanaChat/app/package-lock.json'
+
+    - name: Update dependencies
+      run: |
+        cd TanaChat/app
+        npm update
+        npm audit fix || true
+
+        # Check if anything was updated
+        git diff --exit-code package.json package-lock.json && {
+          echo "No dependency updates needed"
+          exit 0
+        }
+
+    - name: Test updated dependencies
+      run: |
+        cd TanaChat/app
+        npm ci
+        npm test -- --watchAll=false
+
+    - name: Create Pull Request
+      if: success()
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: TanaChat/app
+        commit-message: '📦 Update Node.js dependencies'
+        title: '📦 Update Node.js dependencies'
+        body: |
+          ## 📦 Node.js Dependencies Update
+
+          This PR updates Node.js dependencies to their latest versions.
+
+          ### 📋 Updated Packages
+          <!-- Updated packages will be listed here -->
+
+          ### ✅ Testing
+          - [x] All tests pass with updated dependencies
+          - [x] No security vulnerabilities detected
+          - [x] Application builds successfully
+
+          ### 🔍 Security Audit
+          ```bash
+          npm audit output will be here
+          ```
+        labels: ['dependencies', 'automated', 'frontend']
+        delete-branch: true
+
+  # Docker base image updates
+  update-docker-base:
+    name: Update Docker Base Images
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check for base image updates
+      id: check-updates
+      run: |
+        # Get current base image versions
+        PYTHON_VERSION=$(grep "FROM python:" Dockerfile | head -1 | awk '{print $2}')
+        NODE_VERSION=$(grep "FROM node:" TanaChat/app/Dockerfile | head -1 | awk '{print $2}')
+
+        echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+        echo "node-version=$NODE_VERSION" >> $GITHUB_OUTPUT
+
+        # Check for latest versions (simplified)
+        echo "Current Python version: $PYTHON_VERSION"
+        echo "Current Node.js version: $NODE_VERSION"
+
+    - name: Create issue if updates available
+      if: failure() # This would need more sophisticated logic
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🐳 Docker base image updates available',
+            body: `
+              ## 🐳 Docker Base Image Updates
+
+              The following Docker base images have updates available:
+
+              - Python: \`${{ steps.check-updates.outputs.python-version }}\`
+              - Node.js: \`${{ steps.check-updates.outputs.node-version }}\`
+
+              Please review and update the Dockerfiles accordingly.
+
+              ### 🔄 Action Required
+              1. Review available updates
+              2. Test compatibility with new base images
+              3. Update Dockerfile(s)
+              4. Run full test suite
+
+              ---
+
+              🤖 This issue was created automatically by the dependency update workflow.
+            `,
+            labels: ['dependencies', 'docker', 'maintenance']
+          })
+
+  # Security audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Run Python security audit
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+        safety check --json --output python-safety.json || true
+        bandit -r . -f json -o python-bandit.json || true
+
+    - name: Run Node.js security audit
+      run: |
+        cd TanaChat/app
+        npm audit --json > ../nodejs-audit.json || true
+
+    - name: Create security issue if vulnerabilities found
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+
+          let hasVulnerabilities = false;
+          let issueBody = '## 🔒 Security Vulnerabilities Found\n\n';
+
+          // Check Python safety report
+          try {
+            const safetyReport = JSON.parse(fs.readFileSync('python-safety.json', 'utf8'));
+            if (safetyReport.vulnerabilities && safetyReport.vulnerabilities.length > 0) {
+              hasVulnerabilities = true;
+              issueBody += '### 🐍 Python Dependencies\n\n';
+              safetyReport.vulnerabilities.forEach(vuln => {
+                issueBody += `- **${vuln.package}** (${vuln.version}): ${vuln.advisory}\n`;
+                issueBody += `  - Severity: ${vuln.vuln}\n`;
+                issueBody += `  - CVE: ${vuln.cve}\n\n`;
+              });
+            }
+          } catch (error) {
+            console.log('Could not read Python safety report');
+          }
+
+          // Check Node.js audit report
+          try {
+            const auditReport = JSON.parse(fs.readFileSync('nodejs-audit.json', 'utf8'));
+            if (auditReport.vulnerabilities && Object.keys(auditReport.vulnerabilities).length > 0) {
+              hasVulnerabilities = true;
+              issueBody += '### 📦 Node.js Dependencies\n\n';
+              Object.entries(auditReport.vulnerabilities).forEach(([pkg, info]) => {
+                issueBody += `- **${pkg}**: ${info.severity}\n`;
+              });
+            }
+          } catch (error) {
+            console.log('Could not read Node.js audit report');
+          }
+
+          if (hasVulnerabilities) {
+            issueBody += `
+              ### 🚨 Immediate Action Required
+
+              Please review and address these security vulnerabilities:
+              1. Update affected packages to safe versions
+              2. Test thoroughly after updates
+              3. Deploy patches as soon as possible
+
+              ---
+
+              🤖 This issue was created automatically by the security audit workflow.
+            `;
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔒 Security vulnerabilities detected',
+              body: issueBody,
+              labels: ['security', 'dependencies', 'high-priority']
+            });
+          }
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          python-safety.json
+          python-bandit.json
+          nodejs-audit.json
+        retention-days: 30

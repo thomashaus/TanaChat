@@ -1,0 +1,1 @@
+- enforce and never bypass gitleaks

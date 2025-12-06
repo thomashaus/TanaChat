@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+Tana Login - Authenticate a TanaChat.ai user
+
+Usage: tana-login [username] [options]
+"""
+
+import sys
+import argparse
+import getpass
+from pathlib import Path
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import UserManager, Colors
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Authenticate with TanaChat.ai",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-login john                                    # Interactive password prompt
+  tana-login --username john --token xyz              # Use JWT token
+  tana-login --show-token john                       # Show current token
+
+The script validates credentials and returns authentication info.
+        """
+    )
+
+    parser.add_argument("username", nargs="?", help="Username")
+    parser.add_argument("-u", "--username", help="Username")
+    parser.add_argument("-p", "--password", help="Password (will prompt if not provided)")
+    parser.add_argument("-t", "--token", help="JWT token for direct authentication")
+    parser.add_argument("--show-token", action="store_true", help="Show current JWT token")
+    parser.add_argument("--files-dir", help="Custom files directory (default: ./files)")
+    parser.add_argument("--validate-only", action="store_true", help="Validate token without returning user info")
+
+    args = parser.parse_args()
+
+    # Resolve username
+    username = args.username or args.show_token
+    if not username and not args.token:
+        Colors.error("Username is required")
+
+    # Initialize UserManager
+    if args.files_dir:
+        user_manager = UserManager(Path(args.files_dir))
+    else:
+        user_manager = UserManager()
+
+    # Handle token validation
+    if args.show_token or args.token:
+        token = args.token
+        if not token and args.show_token:
+            # Get user and extract token
+            user = user_manager.get_user(username)
+            if not user:
+                Colors.error(f"User '{username}' not found")
+            token = user.get('jwt_token')
+
+        if not token:
+            Colors.error("No JWT token found for user")
+
+        # Validate token
+        user_info = user_manager.validate_token(token)
+        if not user_info:
+            Colors.error("Invalid or expired JWT token")
+
+        if args.validate_only:
+            Colors.success(f"Token is valid for user: {user_info['username']}")
+        else:
+            print(f"\n{Colors.GREEN}✅ Authentication Successful{Colors.END}")
+            print(f"  User: {Colors.BOLD}{user_info['username']}{Colors.END}")
+            print(f"  User ID: {user_info['user_id']}")
+            print(f"  Name: {user_info['name']}")
+            print(f"  Token: {token[:50]}...")
+        return
+
+    # Password authentication
+    username = args.username or args.u
+    if not username:
+        Colors.error("Username is required")
+
+    password = args.password
+    if not password:
+        password = getpass.getpass(f"Password for {username}: ")
+
+    # Authenticate user
+    user_info = user_manager.authenticate_user(username, password)
+    if not user_info:
+        Colors.error("Authentication failed - invalid username or password")
+
+    # Success
+    print(f"\n{Colors.GREEN}✅ Login Successful{Colors.END}")
+    print(f"  Welcome back, {Colors.BOLD}{user_info['name']}{Colors.END}!")
+    print(f"\n{Colors.CYAN}📋 User Info:{Colors.END}")
+    print(f"  Username: {user_info['username']}")
+    print(f"  Email: {user_info['email']}")
+    print(f"  Tana API Key: {user_info['tana_api_key'][:20]}...")
+    print(f"  Last Login: {user_info['last_login']}")
+
+    print(f"\n{Colors.BLUE}🔑 JWT Token:{Colors.END}")
+    print(f"  {user_info['jwt_token']}")
+
+    print(f"\n{Colors.YELLOW}💡 Use this token for:{Colors.END}")
+    print(f"  - MCP server configuration")
+    print(f"  - API requests (Authorization: Bearer <token>)")
+    print(f"  - CLI tool authentication")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: TanaChat Documentation
+    url: https://github.com/thomashaus/TanaChat/blob/main/README.md
+    about: Check the documentation for common questions and setup guides
+  - name: Tana Official Documentation
+    url: https://tana.inc/docs
+    about: Official Tana documentation and guides
+  - name: Tana Community
+    url: https://discord.gg/tana
+    about: Join the Tana community for discussions and support

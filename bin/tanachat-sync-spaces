@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Sync local files directory to DigitalOcean Spaces."""
+
+import boto3
+import os
+import sys
+from pathlib import Path
+import json
+from datetime import datetime
+
+
+def sync_to_spaces():
+    """Sync local files directory to DigitalOcean Spaces."""
+
+    # Get configuration from environment variables
+    access_key = os.getenv('S3_ACCESS_KEY')
+    secret_key = os.getenv('S3_SECRET_KEY')
+    bucket = os.getenv('S3_BUCKET', 'tanachat')
+    region = os.getenv('S3_REGION', 'nyc3')
+    endpoint = os.getenv('S3_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+
+    if not access_key or not secret_key:
+        print("❌ S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set")
+        sys.exit(1)
+
+    print("🔄 Syncing local files to DigitalOcean Spaces")
+    print(f"📁 Source: ./files")
+    print(f"☁️  Destination: {bucket} @ {endpoint}")
+    print()
+
+    try:
+        # Initialize S3 client for DigitalOcean Spaces
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+
+        # Test bucket access first
+        s3_client.head_bucket(Bucket=bucket)
+        print(f"✅ Connected to bucket: {bucket}")
+        print()
+
+        # Get local files directory
+        local_files_dir = Path("files")
+        if not local_files_dir.exists():
+            print(f"❌ Local files directory not found: {local_files_dir}")
+            sys.exit(1)
+
+        uploaded_files = []
+        created_dirs = []
+
+        # Walk through local files directory
+        for local_path in local_files_dir.rglob("*"):
+            # Calculate relative path for S3
+            relative_path = local_path.relative_to(local_files_dir)
+
+            if local_path.is_file():
+                # Upload file
+                s3_key = str(relative_path)
+
+                try:
+                    # Determine content type
+                    if s3_key.endswith('.json'):
+                        content_type = 'application/json'
+                    elif s3_key.endswith('.txt'):
+                        content_type = 'text/plain'
+                    else:
+                        content_type = 'application/octet-stream'
+
+                    s3_client.upload_file(
+                        str(local_path),
+                        bucket,
+                        s3_key,
+                        ExtraArgs={
+                            'ContentType': content_type,
+                            'CacheControl': 'no-cache'
+                        }
+                    )
+                    print(f"📄 Uploaded: {s3_key}")
+                    uploaded_files.append(s3_key)
+
+                except Exception as e:
+                    print(f"❌ Failed to upload {s3_key}: {e}")
+
+            elif local_path.is_dir():
+                # Create directory by uploading empty object with / suffix
+                s3_key = str(relative_path) + "/"
+
+                try:
+                    s3_client.put_object(
+                        Bucket=bucket,
+                        Key=s3_key,
+                        Body=b'',
+                        ContentType='application/x-directory'
+                    )
+                    print(f"📂 Created directory: {s3_key}")
+                    created_dirs.append(s3_key)
+
+                except Exception as e:
+                    # Directory might already exist
+                    print(f"⚠️  Directory exists: {s3_key}")
+
+        print()
+        print(f"🎉 Sync completed!")
+        print(f"📊 Statistics:")
+        print(f"   📁 Directories: {len(created_dirs)}")
+        print(f"   📄 Files uploaded: {len(uploaded_files)}")
+        print()
+        print(f"📋 Uploaded files:")
+        for file_path in sorted(uploaded_files):
+            print(f"   ✅ {file_path}")
+
+        # Verify the upload
+        print()
+        print("🔍 Verifying sync...")
+        response = s3_client.list_objects_v2(
+            Bucket=bucket,
+            MaxKeys=1000
+        )
+
+        if 'Contents' in response:
+            print(f"   📦 Total objects in bucket: {len(response['Contents'])}")
+            for obj in response['Contents'][:10]:  # Show first 10
+                print(f"   📄 {obj['Key']}")
+            if len(response['Contents']) > 10:
+                print(f"   ... and {len(response['Contents']) - 10} more")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error syncing to Spaces: {e}")
+        return False
+
+
+def create_sync_metadata():
+    """Create a sync metadata file to track when files were synced."""
+    metadata = {
+        "sync_timestamp": datetime.utcnow().isoformat(),
+        "sync_version": "1.0",
+        "source_directory": "./files",
+        "destination": "https://tanachat.nyc3.digitaloceanspaces.com",
+        "files_synced": []
+    }
+
+    # Add file metadata
+    files_dir = Path("files")
+    if files_dir.exists():
+        for file_path in files_dir.rglob("*"):
+            if file_path.is_file():
+                relative_path = str(file_path.relative_to(files_dir))
+                metadata["files_synced"].append({
+                    "path": relative_path,
+                    "size": file_path.stat().st_size,
+                    "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+                })
+
+    # Save metadata locally
+    metadata_file = files_dir / "sync_metadata.json"
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"📄 Created sync metadata: {metadata_file}")
+
+
+def main():
+    """Main sync function."""
+    print("🚀 TanaChat Spaces Sync")
+    print("=" * 40)
+    print()
+
+    # Create sync metadata first
+    create_sync_metadata()
+    print()
+
+    # Sync files to Spaces
+    success = sync_to_spaces()
+
+    if success:
+        print()
+        print("🎉 Spaces sync completed successfully!")
+        print()
+        print("📌 Important URLs:")
+        print("   🔗 Direct Spaces: https://tanachat.nyc3.digitaloceanspaces.com")
+        print("   🌐 CDN URL: https://cdn.tanachat.ai (when configured)")
+        print("   📋 Metadata: https://tanachat.nyc3.digitaloceanspaces.com/metadata/users.json")
+        print()
+        print("✅ Login system should now work with users.json in metadata!")
+    else:
+        print()
+        print("❌ Spaces sync failed!")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

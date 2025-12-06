@@ -1,0 +1,198 @@
+# GitHub Repository Settings for TanaChat
+# This file documents the desired repository settings
+
+# Repository Information
+_repository_name: TanaChat
+_description: AI-powered platform with MCP server, API, and web interface for Tana workspace management and analysis
+_homepage: https://tanachat.ai
+_topics:
+  - tana
+  - mcp
+  - ai
+  - api
+  - fastapi
+  - react
+  - python
+  - workspace-management
+  - knowledge-management
+
+# Repository Settings
+_visibility: public
+_has_issues_enabled: true
+_has_projects_enabled: false
+_has_wiki_enabled: false
+_has_discussions_enabled: true
+_delete_branch_on_merge: true
+_allow_squash_merge: true
+_allow_merge_commit: false
+_allow_rebase_merge: false
+_default_branch: main
+
+# Security and Policies
+_has_security_policy: true
+_has_vulnerability_alerts: true
+_has_dependency_graph: true
+_has_automated_security_fixes: true
+
+# Labels Configuration
+_labels:
+  # Priority Labels
+  - name: "priority: critical"
+    color: "#FF0000"
+    description: "Critical priority, must be addressed immediately"
+  - name: "priority: high"
+    color: "#FF6B00"
+    description: "High priority, should be addressed soon"
+  - name: "priority: medium"
+    color: "#FFD700"
+    description: "Medium priority, normal timeframe"
+  - name: "priority: low"
+    color: "#00FF00"
+    description: "Low priority, can be addressed later"
+
+  # Type Labels
+  - name: "bug"
+    color: "#D73A4A"
+    description: "Something isn't working"
+  - name: "enhancement"
+    color: "#A2EEEF"
+    description: "New feature or request"
+  - name: "documentation"
+    color: "#0075CA"
+    description: "Improvements or additions to documentation"
+  - name: "security"
+    color: "#FF0000"
+    description: "Security-related issues"
+  - name: "performance"
+    color: "#FBCA04"
+    description: "Performance-related issues"
+
+  # Component Labels
+  - name: "api"
+    color: "#006B75"
+    description: "Issues related to the FastAPI backend"
+  - name: "frontend"
+    color: "#5319E7"
+    description: "Issues related to the React frontend"
+  - name: "mcp"
+    color: "#008672"
+    description: "Issues related to the MCP server"
+  - name: "cli"
+    color: "#795548"
+    description: "Issues related to command-line tools"
+  - name: "tana-integration"
+    color: "#1D76DB"
+    description: "Issues related to Tana API integration"
+  - name: "infrastructure"
+    color: "#690E0E"
+    description: "Issues related to deployment and infrastructure"
+
+  # Status Labels
+  - name: "needs-triage"
+    color: "#FFFFFF"
+    description: "Issue needs to be triaged"
+  - name: "in-progress"
+    color: "#FCEA2B"
+    description: "Currently being worked on"
+  - name: "blocked"
+    color: "#000000"
+    description: "Blocked by other issues"
+  - name: "ready-for-review"
+    color: "#0E8A16"
+    description: "Ready for code review"
+  - name: "needs-information"
+    color: "#B60205"
+    description: "More information needed"
+
+  # Workflow Labels
+  - name: "dependencies"
+    color: "#0366D6"
+    description: "Pull requests that update dependencies"
+  - name: "automated"
+    color: "#E4E669"
+    description: "Automated pull requests"
+  - name: "wontfix"
+    color: "#FFFFFF"
+    description: "This will not be worked on"
+
+# Branch Protection Rules for main branch
+_branch_protection_main:
+  required_status_checks:
+    strict: true
+    contexts:
+      - "🚀 CI Pipeline (code-quality)"
+      - "🚀 CI Pipeline (test-python)"
+      - "🚀 CI Pipeline (test-nodejs)"
+      - "🚀 CI Pipeline (test-integration)"
+      - "Gitleaks Security Scan"
+  enforce_admins: true
+  required_pull_request_reviews:
+    required_approving_review_count: 1
+    dismiss_stale_reviews: true
+    require_code_owner_reviews: true
+  restrictions:
+    users: []
+    teams: []
+
+# Milestones
+_milestones:
+  - title: "v0.1.0 - Initial Release"
+    description: "Initial release with core functionality"
+    state: open
+  - title: "v0.2.0 - Enhanced Features"
+    description: "Enhanced workspace analysis and user management"
+    state: open
+  - title: "v0.3.0 - Performance & Scaling"
+    description: "Performance improvements and scaling features"
+    state: open
+
+# Teams (if using GitHub Teams)
+_teams:
+  - name: "maintainers"
+    description: "Repository maintainers with full access"
+    permission: "admin"
+  - name: "contributors"
+    description: "Active contributors with write access"
+    permission: "write"
+  - name: "triage"
+    description: "Community members who help triage issues"
+    permission: "triage"
+
+# Automations
+_automations:
+  # Issue and PR automation
+  close_inactive_issues:
+    days: 30
+    message: "This issue has been automatically closed due to inactivity. Please feel free to reopen if you're still experiencing this issue."
+
+  welcome_new_contributors:
+    message: |
+      🎉 Thank you for your first contribution to TanaChat!
+
+      Here are some resources that might help:
+      - 📚 [Contributing Guide](https://github.com/thomashaus/TanaChat/blob/main/.github/CONTRIBUTING.md)
+      - 🐛 [Bug Report Template](https://github.com/thomashaus/TanaChat/blob/main/.github/ISSUE_TEMPLATE/bug_report.md)
+      - ✨ [Feature Request Template](https://github.com/thomashaus/TanaChat/blob/main/.github/ISSUE_TEMPLATE/feature_request.md)
+
+      If you have any questions, feel free to ask in the comments or start a [discussion](https://github.com/thomashaus/TanaChat/discussions).
+
+# Environment Protection Rules
+_environment_rules:
+  staging:
+    reviewers: ["thomashaus"]
+    wait_timer: 5
+  production:
+    reviewers: ["thomashaus"]
+    wait_timer: 15
+
+# Webhooks (commented out for public repo - configure when needed)
+# _webhooks:
+#   - url: "https://api.example.com/webhooks/github"
+#     content_type: json
+#     insecure_ssl: false
+#     secret: ${{ secrets.WEBHOOK_SECRET }}
+#     events:
+#       - push
+#       - pull_request
+#       - issues
+#       - release
