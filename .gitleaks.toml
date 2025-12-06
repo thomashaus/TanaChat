@@ -4,8 +4,17 @@ title = "gitleaks config for TanaChat - STRICT MODE"
 [extend]
 useDefault = true
 
-# NO ALLOWLISTS - All potential secrets will be flagged
-# This ensures maximum security - never allow patterns that could hide real credentials
+# Allowlist for gitignored development files
+# Only exclude files that are properly gitignored
+[allowlist]
+paths = [
+    '''\.do\/''',
+    '''local\/tmp\/''',
+    '''localstack-data''',
+    '''\.env''',
+    '''\.pem$''',
+    '''\.key$'''
+]
 
 # Additional custom rules for our specific services
 [[rules]]

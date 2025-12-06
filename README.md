@@ -28,13 +28,18 @@ TanaChat.ai is a comprehensive AI-powered platform for **Tana workspace manageme
 ## 🏗 Architecture
 
 - **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS
-- **Backend**: FastAPI + Python 3.12 + Pydantic
-- **MCP Server**: FastMCP + Python 3.12
+- **Backend**: FastAPI + MCP Protocol + Python 3.12 + Pydantic (single unified service)
 - **CLI Tools**: Click + Python 3.12
 - **Database**: PostgreSQL (production) / SQLite (development)
 - **Storage**: DigitalOcean Spaces (S3 compatible)
 - **Authentication**: JWT tokens
 - **Deployment**: Docker + DigitalOcean App Platform
+
+### Simplified Service Architecture
+- **2 Services Only**: Frontend (React) + Backend (MCP Server with FastAPI)
+- **Unified Backend**: MCP server provides both REST API and MCP protocol
+- **Independent Scaling**: Each service can be scaled and deployed separately
+- **Clean Separation**: Frontend focuses on UI, Backend handles all business logic
 
 ## 🚀 Quick Start
 
@@ -106,7 +111,10 @@ VITE_API_URL=http://localhost:8000
 ### 3. Start Development Services
 
 ```bash
-# Start all services
+# Option 1: Docker Local Development (Recommended)
+docker-compose -f local/docker-compose.yml up -d
+
+# Option 2: Native Development
 make dev
 
 # Or start individual services:
@@ -115,13 +123,27 @@ make dev-api    # API only (http://localhost:8000)
 make dev-mcp    # MCP server only (http://localhost:8001)
 ```
 
-### 4. Verify Setup
+### 4. Setup LocalStack for Docker Development
+
+If using Docker Compose, setup LocalStack S3 storage:
+
+```bash
+# Automated setup
+./local/setup-localstack.sh
+
+# Or manual setup
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
+  aws --endpoint-url=http://localhost:4566 s3 mb s3://tanachat-local
+```
+
+### 5. Verify Setup
 
 Once running, visit:
 - **Web Interface**: http://localhost:5173
 - **API Documentation**: http://localhost:8000/docs
 - **API Health**: http://localhost:8000/api/health
-- **MCP Health**: http://localhost:8001/health
+- **MCP Health**: http://localhost:8000/health
+- **LocalStack Health**: http://localhost:4566/_localstack/health
 
 ## 🛠 Development Guide
 
@@ -269,18 +291,29 @@ npm run lint
 ### Local Development with Docker
 
 ```bash
-# Start all services with Docker Compose
-docker-compose up -d
+# Start all services with LocalStack
+docker-compose -f local/docker-compose.yml up -d
 
 # View logs
-docker-compose logs -f
+docker-compose -f local/docker-compose.yml logs -f
 
 # Stop services
-docker-compose down
+docker-compose -f local/docker-compose.yml down
 
 # Rebuild specific service
-docker-compose up -d --build tanachat-api
+docker-compose -f local/docker-compose.yml up -d --build tanachat-mcp
+
+# Setup LocalStack S3 storage
+./local/setup-localstack.sh
+
+# Check container status
+docker ps | grep tanachat
 ```
+
+**Services Started:**
+- **tanachat-app**: React frontend (http://localhost:5173)
+- **tanachat-mcp**: MCP + API server (http://localhost:8000)
+- **tanachat-localstack**: S3-compatible storage (http://localhost:4566)
 
 ### Production Docker Images
 
@@ -511,6 +544,11 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📚 Documentation
+
+- **[Local Development Guide](docs/LOCAL_DEVELOPMENT.md)** - Complete LocalStack setup and troubleshooting
+- **[MCP Client Setup](docs/MCP_CLIENT_SETUP.md)** - Configure Claude Desktop, Claude Code, and ChatGPT
 
 ## 🔗 Links
 

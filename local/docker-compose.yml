@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - DATA_DIR=/var/lib/localstack
+      - HOST_TMP_FOLDER=/var/lib/localstack/tmp
+    volumes:
+      - "./tmp/localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - tanachat
+    container_name: tanachat-localstack
+
+  tanachat-app:
+    build:
+      context: ../app
+      dockerfile: Dockerfile.do
+    ports:
+      - "5173:80"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:8000
+      - VITE_CDN_URL=http://localhost:5173
+    volumes:
+      - ../app/src:/app/src
+      - ../app/public:/app/public
+    restart: unless-stopped
+    depends_on:
+      - tanachat-mcp
+      - localstack
+    networks:
+      - tanachat
+    container_name: tanachat-app
+
+  tanachat-mcp:
+    build:
+      context: ../mcp
+      dockerfile: Dockerfile.do
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app/src
+      - LOG_LEVEL=info
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Local development URLs
+      - VITE_API_URL=http://localhost:8000
+      - FRONTEND_URL=http://localhost:5173
+      - CORS_ORIGINS=http://localhost:5173
+      # LocalStack configuration
+      - S3_ENDPOINT=http://localstack:4566
+      - S3_ACCESS_KEY=test
+      - S3_SECRET_KEY=test
+      - S3_BUCKET=tanachat-local
+    volumes:
+      - ../mcp/src:/app/src
+      - ../mcp/pyproject.toml:/app/pyproject.toml
+      - ../mcp/uv.lock:/app/uv.lock
+    restart: unless-stopped
+    depends_on:
+      - localstack
+    networks:
+      - tanachat
+    container_name: tanachat-mcp
+
+networks:
+  tanachat:
+    driver: bridge
