@@ -1,0 +1,39 @@
+title = "gitleaks config for TanaChat - STRICT MODE"
+
+# Extend default rules for comprehensive scanning
+[extend]
+useDefault = true
+
+# NO ALLOWLISTS - All potential secrets will be flagged
+# This ensures maximum security - never allow patterns that could hide real credentials
+
+# Additional custom rules for our specific services
+[[rules]]
+id = "digitalocean-spaces-key"
+description = "DigitalOcean Spaces access key pattern"
+regex = '''(?i)(^|[^a-zA-Z0-9])do\d[a-zA-Z0-9]{15,25}([^a-zA-Z0-9]|$)'''
+tags = ["key", "digitalocean", "spaces"]
+
+[[rules]]
+id = "digitalocean-token"
+description = "DigitalOcean API token pattern"
+regex = '''(?i)(^|[^a-zA-Z0-9])dop_v1_[a-zA-Z0-9]{43,}([^a-zA-Z0-9]|$)'''
+tags = ["token", "digitalocean", "api"]
+
+[[rules]]
+id = "tana-api-key"
+description = "Tana API key pattern"
+regex = '''(?i)(^|[^a-zA-Z0-9])tan[a-zA-Z0-9]{20,}([^a-zA-Z0-9]|$)'''
+tags = ["key", "tana", "api"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS access key pattern"
+regex = '''(?i)(^|[^a-zA-Z0-9])AKIA[0-9A-Z]{16}([^a-zA-Z0-9]|$)'''
+tags = ["key", "aws"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key pattern"
+regex = '''(?i)(access_key|api_key|secret_key|password|token)\s*[=:]\s*['"]?[a-zA-Z0-9]{20,}['"]?'''
+tags = ["key", "api", "secret", "password", "token"]

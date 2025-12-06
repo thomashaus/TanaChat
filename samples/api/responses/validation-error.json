@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "error": "Validation failed",
+  "validation": {
+    "valid": false,
+    "error": "Tana validation error",
+    "details": "Node missing required field: uid"
+  },
+  "line_number": 5,
+  "context": {
+    "near": "  \"name\": \"No UID\","
+  }
+}

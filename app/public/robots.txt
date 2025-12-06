@@ -1,0 +1,235 @@
+# robots.txt for TanaChat
+# This file blocks ALL crawlers including AI/data scrapers
+
+# Disallow all crawlers from accessing any part of the site
+User-agent: *
+Disallow: /
+
+# Common search engine crawlers
+User-agent: Googlebot
+Disallow: /
+
+User-agent: Bingbot
+Disallow: /
+
+User-agent: Slurp
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+# AI/Data Scrapers - BLOCK ALL
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: GPT-4
+Disallow: /
+
+User-agent: GPT-3.5
+Disallow: /
+
+User-agent: GoogleOther
+Disallow: /
+
+User-agent: GoogleOther-Image
+Disallow: /
+
+User-agent: GoogleOther-Video
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: perplexitybot
+Disallow: /
+
+User-agent: YouBot
+Disallow: /
+
+User-agent: You
+Disallow: /
+
+User-agent: Applebot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: Meta-ExternalFetcher
+Disallow: /
+
+User-agent: ia_archiver
+Disallow: /
+
+User-agent: archive.org_bot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: AspiegelBot
+Disallow: /
+
+User-agent: DataForSeoBot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: ChatGPT
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: istellabot
+Disallow: /
+
+User-agent: Luminator-robots
+Disallow: /
+
+User-agent: MegaIndex.ru
+Disallow: /
+
+User-agent: MeltwaterNews
+Disallow: /
+
+User-agent: MonkeyTest
+Disallow: /
+
+User-agent: Nutch
+Disallow: /
+
+User-agent: OnCrawl
+Disallow: /
+
+User-agent: owlin
+Disallow: /
+
+User-agent: Peer39_crawler
+Disallow: /
+
+User-agent: Peer39_crawler/1.0
+Disallow: /
+
+User-agent: PerplexityBot-1.0
+Disallow: /
+
+User-agent: PiplBot
+Disallow: /
+
+User-agent: Seekr_crawler
+Disallow: /
+
+User-agent: Seekr
+Disallow: /
+
+User-agent: SentimentAgent
+Disallow: /
+
+User-agent: Timpibot
+Disallow: /
+
+User-agent: VelenPublicWebCrawler
+Disallow: /
+
+User-agent: Y!J-ASR
+Disallow: /
+
+User-agent: Y!J-BRJ
+Disallow: /
+
+User-agent: Y!J-BRW
+Disallow: /
+
+User-agent: Y!J-PSC
+Disallow: /
+
+User-agent: Y!J-SRD
+Disallow: /
+
+User-agent: Y!J-WSC
+Disallow: /
+
+# Social media crawlers (blocked)
+User-agent: Twitterbot
+Disallow: /
+
+User-agent: LinkedInBot
+Disallow: /
+
+User-agent: facebookexternalhit
+Disallow: /
+
+User-agent: Pinterestbot
+Disallow: /
+
+User-agent: Instagrambot
+Disallow: /
+
+User-agent: Snapchat-Ads-Product-Crawler
+Disallow: /
+
+# Additional AI/ML crawlers
+User-agent: omgili
+Disallow: /
+
+User-agent: omgilibot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+# Crawl delay for any bot that ignores Disallow
+Crawl-delay: 86400
+
+# Block access to sensitive paths explicitly
+# Sitemap not provided - this is a private/internal application
+
+# Note: This application is for internal use only.
+# All automated access is prohibited.

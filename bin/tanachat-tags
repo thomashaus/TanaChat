@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""
+Tana Tags - Analyze supertags in Tana workspace exports
+A portable tool that works with any Tana workspace.
+
+Usage: tana-tags [options] export.json
+"""
+
+import json
+import sys
+import os
+import argparse
+from pathlib import Path
+from datetime import datetime
+from collections import defaultdict
+
+# ANSI color codes
+class Colors:
+    GREEN = '\033[92m'
+    BLUE = '\033[94m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+def error(msg):
+    print(f"{Colors.RED}❌ {msg}{Colors.END}")
+    sys.exit(1)
+
+def success(msg):
+    print(f"{Colors.GREEN}✅ {msg}{Colors.END}")
+
+def info(msg):
+    print(f"{Colors.BLUE}ℹ️  {msg}{Colors.END}")
+
+def warning(msg):
+    print(f"{Colors.YELLOW}⚠️  {msg}{Colors.END}")
+
+def load_export(export_file):
+    """Load and validate Tana export file"""
+    if not Path(export_file).exists():
+        error(f"Export file not found: {export_file}")
+
+    try:
+        with open(export_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Validate basic structure
+        if 'docs' not in data:
+            warning("Export may not be in expected format (no 'docs' field)")
+
+        return data
+    except json.JSONDecodeError as e:
+        error(f"Invalid JSON in export file: {e}")
+    except Exception as e:
+        error(f"Error reading export file: {e}")
+
+def find_supertags(data):
+    """Find and count all supertags in the workspace"""
+    docs = data.get('docs', [])
+    supertag_counts = defaultdict(int)
+    supertag_examples = defaultdict(list)
+
+    # Track supertags per node
+    for doc in docs:
+        if 'supertags' in doc:
+            for supertag in doc['supertags']:
+                if isinstance(supertag, dict) and 'name' in supertag:
+                    name = supertag['name']
+                    supertag_counts[name] += 1
+
+                    # Store examples (first few nodes for each supertag)
+                    if len(supertag_examples[name]) < 3:
+                        example_text = doc.get('name', '')[:50]
+                        if len(doc.get('name', '')) > 50:
+                            example_text += '...'
+                        supertag_examples[name].append(example_text)
+
+    return dict(supertag_counts), dict(supertag_examples)
+
+def categorize_supertags(supertag_counts):
+    """Categorize supertags into time-based and content-based"""
+    time_keywords = ['day', 'week', 'month', 'quarter', 'year', 'journal', 'daily']
+    content_keywords = ['note', 'idea', 'content', 'meeting', 'project', 'task']
+
+    time_based = {}
+    content_based = {}
+    other = {}
+
+    for name, count in supertag_counts.items():
+        lower_name = name.lower()
+        if any(keyword in lower_name for keyword in time_keywords):
+            time_based[name] = count
+        elif any(keyword in lower_name for keyword in content_keywords):
+            content_based[name] = count
+        else:
+            other[name] = count
+
+    return time_based, content_based, other
+
+def format_file_size(size_bytes):
+    """Format file size in human readable format"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze supertags in Tana workspace exports",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-tags                                    # Analyze latest export
+  tana-tags export.json                       # Analyze specific export
+  tana-tags --exports                          # List available exports
+  tana-tags export.json --verbose              # Show node examples
+  tana-tags export.json --count                # Count only
+
+This tool provides insights into your Tana workspace supertag usage without
+requiring any specific Tana configuration.
+        """
+    )
+
+    parser.add_argument("export_file", nargs="?", help="Path to Tana export JSON file")
+    parser.add_argument("--exports", action="store_true", help="List available export files")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show node examples")
+    parser.add_argument("-c", "--count", action="store_true", help="Show only count of unique supertags")
+    parser.add_argument("--sort", choices=["name", "count"], default="count", help="Sort by name or count (default: count)")
+
+    args = parser.parse_args()
+
+    # List available exports
+    if args.exports:
+        possible_dirs = [
+            Path("Tana/Exports"),
+            Path("../Tana/Exports"),
+            Path("./exports"),
+            Path("../exports")
+        ]
+
+        print(f"{Colors.CYAN}🔍 SEARCHING FOR TANA EXPORTS...{Colors.END}")
+        found_any = False
+
+        for export_dir in possible_dirs:
+            if export_dir.exists():
+                exports = list(export_dir.glob("*.json"))
+                exports = [f for f in exports if not f.name.endswith("_with_todoist.json")]
+
+                if exports:
+                    found_any = True
+                    print(f"\n{Colors.BLUE}📁 {export_dir}:{Colors.END}")
+                    for export_file in sorted(exports, key=lambda f: f.stat().st_mtime, reverse=True):
+                        size = export_file.stat().st_size
+                        mod_time = datetime.fromtimestamp(export_file.stat().st_mtime)
+                        print(f"  • {export_file.name} ({format_file_size(size)}, {mod_time.strftime('%Y-%m-%d %H:%M')})")
+
+        if not found_any:
+            error("No Tana export files found in common directories")
+        return
+
+    # Find export file
+    if args.export_file:
+        export_path = Path(args.export_file)
+    else:
+        # Try common export directories
+        possible_dirs = [
+            Path("Tana/Exports"),
+            Path("../Tana/Exports"),
+            Path("./exports"),
+            Path("../exports")
+        ]
+
+        export_path = None
+        for export_dir in possible_dirs:
+            if export_dir.exists():
+                try:
+                    exports = list(export_dir.glob("*.json"))
+                    exports = [f for f in exports if not f.name.endswith("_with_todoist.json")]
+                    if exports:
+                        export_path = max(exports, key=lambda f: f.stat().st_mtime)
+                        break
+                except:
+                    continue
+
+        if not export_path:
+            error("No Tana export file found. Use --exports to see available files or specify the path.")
+
+    info(f"Analyzing: {export_path.name}")
+
+    # Load and analyze export
+    data = load_export(export_path)
+    supertag_counts, supertag_examples = find_supertags(data)
+
+    if not supertag_counts:
+        warning("No supertags found in this export")
+        return
+
+    # Show count only
+    if args.count:
+        print(len(supertag_counts))
+        return
+
+    # Categorize supertags
+    time_based, content_based, other = categorize_supertags(supertag_counts)
+
+    # Sort results
+    reverse_sort = args.sort == "count"
+    time_based = dict(sorted(time_based.items(), key=lambda x: x[0 if args.sort == "name" else 1], reverse=reverse_sort))
+    content_based = dict(sorted(content_based.items(), key=lambda x: x[0 if args.sort == "name" else 1], reverse=reverse_sort))
+    other = dict(sorted(other.items(), key=lambda x: x[0 if args.sort == "name" else 1], reverse=reverse_sort))
+
+    # Display results
+    file_size = export_path.stat().st_size
+    total_nodes = len(data.get('docs', []))
+    total_tagged_nodes = sum(supertag_counts.values())
+
+    print(f"\n{Colors.CYAN}📊 TANA SUPERTAG ANALYSIS{Colors.END}")
+    print(f"{Colors.BLUE}Export file:{Colors.END} {export_path.name}")
+    print(f"{Colors.BLUE}File size:{Colors.END} {format_file_size(file_size)}")
+    print(f"{Colors.BLUE}Total nodes:{Colors.END} {total_nodes:,}")
+    print(f"{Colors.BLUE}Tagged nodes:{Colors.END} {total_tagged_nodes:,}")
+    print(f"{Colors.BLUE}Modified:{Colors.END} {datetime.fromtimestamp(export_path.stat().st_mtime):%Y-%m-%d %H:%M}")
+    print()
+
+    # Time-based supertags
+    if time_based:
+        print(f"{Colors.YELLOW}⏰ TIME-BASED SUPERTAGS{Colors.END}")
+        for name, count in time_based.items():
+            print(f"  {name:<25} {count:>4} instances")
+            if args.verbose and name in supertag_examples:
+                for example in supertag_examples[name][:2]:
+                    print(f"    • {example}")
+        print()
+
+    # Content-based supertags
+    if content_based:
+        print(f"{Colors.GREEN}📝 CONTENT-BASED SUPERTAGS{Colors.END}")
+        for name, count in content_based.items():
+            print(f"  {name:<25} {count:>4} instances")
+            if args.verbose and name in supertag_examples:
+                for example in supertag_examples[name][:2]:
+                    print(f"    • {example}")
+        print()
+
+    # Other supertags
+    if other:
+        print(f"{Colors.CYAN}🔧 OTHER SUPERTAGS{Colors.END}")
+        for name, count in other.items():
+            print(f"  {name:<25} {count:>4} instances")
+            if args.verbose and name in supertag_examples:
+                for example in supertag_examples[name][:2]:
+                    print(f"    • {example}")
+
+    # Summary
+    print(f"\n{Colors.BOLD}📈 SUMMARY:{Colors.END}")
+    print(f"  Total supertags: {len(supertag_counts)}")
+    print(f"  Time-based: {len(time_based)}")
+    print(f"  Content-based: {len(content_based)}")
+    print(f"  Other: {len(other)}")
+    print(f"  Total tagged nodes: {total_tagged_nodes:,}")
+
+    success(f"Analysis complete for {len(supertag_counts)} supertags")
+
+if __name__ == "__main__":
+    main()

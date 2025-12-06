@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+Tana Convert - Convert markdown to Tana paste format
+A portable tool that works with any Tana workspace.
+
+Usage: tana-convert [file] [options]
+"""
+
+import sys
+import os
+import argparse
+import re
+from pathlib import Path
+
+# ANSI color codes
+class Colors:
+    GREEN = '\033[92m'
+    BLUE = '\033[94m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+def error(msg):
+    print(f"{Colors.RED}❌ {msg}{Colors.END}")
+    sys.exit(1)
+
+def success(msg):
+    print(f"{Colors.GREEN}✅ {msg}{Colors.END}")
+
+def info(msg):
+    print(f"{Colors.BLUE}ℹ️  {msg}{Colors.END}")
+
+def clean_text(text, preserve_emphasis=False):
+    """Clean text for Tana"""
+    if not preserve_emphasis:
+        # Remove markdown formatting
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Bold
+        text = re.sub(r'\*(.*?)\*', r'\1', text)        # Italic
+        text = re.sub(r'`(.*?)`', r'\1', text)          # Inline code
+
+    # Remove markdown links
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+    # Clean up extra whitespace
+    text = re.sub(r'\n+', ' ', text)
+    text = text.strip()
+    return text
+
+def convert_markdown_to_tana(content, options):
+    """Convert markdown to Tana paste format"""
+    lines = content.split('\n')
+    result = []
+    current_level = 0
+
+    for line in lines:
+        line = line.rstrip()
+
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Handle headings
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            title = clean_text(heading_match.group(2), options.preserve_emphasis)
+
+            indent = '  ' * (level - 1)
+            bullet = options.bullet if options.bullet else "- "
+
+            # Add supertag if this is the first heading
+            if options.supertag and not any('supertag' in prev_line for prev_line in result):
+                result.append(f'{indent}{bullet}{title} ${options.field_sep}{options.supertag}')
+            else:
+                result.append(f'{indent}{bullet}{title}')
+
+            current_level = level
+            continue
+
+        # Handle lists
+        list_match = re.match(r'^\s*[-*+]\s+(.+)$', line)
+        if list_match:
+            content = clean_text(list_match.group(1), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            bullet = options.bullet if options.bullet else "- "
+            result.append(f'{indent}{bullet}{content}')
+            continue
+
+        # Handle numbered lists
+        numbered_match = re.match(r'^\s*\d+\.\s+(.+)$', line)
+        if numbered_match:
+            content = clean_text(numbered_match.group(1), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            result.append(f'{indent}{content}')
+            continue
+
+        # Handle task lists
+        task_match = re.match(r'^\s*[-*+]\s+\[([ x])\]\s+(.+)$', line)
+        if task_match:
+            status = task_match.group(1)
+            content = clean_text(task_match.group(2), options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            checkbox = "☑" if status == 'x' else "☐"
+            result.append(f'{indent}{checkbox} {content}')
+            continue
+
+        # Handle regular content
+        if line.strip():
+            # Skip YAML frontmatter
+            if line.startswith('---') and result == []:
+                continue
+            if ':' in line and not result:
+                continue
+
+            content = clean_text(line, options.preserve_emphasis)
+            indent = '  ' * (current_level + 1)
+            result.append(f'{indent}{content}')
+
+    return '\n'.join(result)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Convert markdown to Tana paste format",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tana-convert notes.md                    # Convert and display
+  tana-convert notes.md | pbcopy           # Convert and copy to clipboard (macOS)
+  tana-convert notes.md -o output.txt      # Save to file
+  tana-convert --supertag "Atomic Note" notes.md  # Add supertag
+
+Output can be pasted directly into Tana to create hierarchical nodes.
+
+Tana Target Options:
+  - Copy output and paste into any Tana node
+  - Use with pbcopy for instant clipboard (macOS): tana-convert file.md | pbcopy
+  - Save to file for later use: tana-convert file.md -o tana-output.txt
+        """
+    )
+
+    parser.add_argument("file", nargs="?", help="Markdown file to convert")
+    parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    parser.add_argument("--supertag", help="Add supertag to first heading")
+    parser.add_argument("--preserve-emphasis", action="store_true",
+                       help="Keep *italic* and **bold** formatting")
+    parser.add_argument("--field-sep", default=":", help="Field separator (default: ':')")
+    parser.add_argument("--bullet", help="Custom bullet character (default: '-')")
+    parser.add_argument("--stats", action="store_true", help="Show conversion statistics")
+    parser.add_argument("--demo", action="store_true", help="Show demo conversion")
+
+    args = parser.parse_args()
+
+    # Show demo if requested
+    if args.demo:
+        demo_content = """# Project Planning
+
+## Tasks
+- Design system architecture
+- Write documentation
+- Test features
+
+### Status
+Ready to start development
+
+## Notes
+This is a sample markdown file converted to Tana format.
+"""
+        result = convert_markdown_to_tana(demo_content, args)
+        print(f"{Colors.CYAN}📝 Demo Conversion Result:{Colors.END}")
+        print(f"{Colors.BLUE}Input (Markdown):{Colors.END}")
+        print(demo_content)
+        print(f"{Colors.GREEN}Output (Tana Format):{Colors.END}")
+        print(result)
+        return
+
+    # Read input
+    if args.file:
+        input_path = Path(args.file)
+        if not input_path.exists():
+            error(f"File not found: {args.file}")
+        with open(input_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    else:
+        # Read from stdin
+        info("Reading from stdin...")
+        content = sys.stdin.read()
+
+    if not content.strip():
+        error("No content to convert")
+
+    # Convert content
+    try:
+        result = convert_markdown_to_tana(content, args)
+
+        # Output
+        if args.output:
+            output_path = Path(args.output)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(result)
+            success(f"Converted to: {output_path}")
+            info(f"Paste this content into Tana to create hierarchical nodes")
+        else:
+            print(result)
+            info(f"Content ready to paste into Tana")
+
+        # Show statistics
+        if args.stats:
+            original_lines = len(content.splitlines())
+            original_words = len(content.split())
+            converted_lines = len(result.splitlines())
+            converted_nodes = result.count('-')
+
+            print(f"\n{Colors.BLUE}📊 Conversion Statistics:{Colors.END}")
+            print(f"  Original: {original_lines} lines, {original_words} words")
+            print(f"  Converted: {converted_lines} lines, {converted_nodes} nodes")
+
+    except Exception as e:
+        error(f"Conversion failed: {e}")
+
+if __name__ == "__main__":
+    main()

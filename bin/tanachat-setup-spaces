@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Setup directory structure in DigitalOcean Spaces for TanaChat."""
+
+import boto3
+import os
+import sys
+from pathlib import Path
+
+def setup_spaces_directories():
+    """Create required directories in DigitalOcean Spaces."""
+
+    # Get configuration from environment variables
+    access_key = os.getenv('S3_ACCESS_KEY')
+    secret_key = os.getenv('S3_SECRET_KEY')
+    bucket = os.getenv('S3_BUCKET', 'tanachat')
+    region = os.getenv('S3_REGION', 'nyc3')
+    endpoint = os.getenv('S3_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+
+    if not access_key or not secret_key:
+        print("❌ S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set")
+        sys.exit(1)
+
+    print(f"🔧 Setting up directories in Spaces bucket: {bucket}")
+    print(f"📍 Region: {region}")
+    print(f"🌐 Endpoint: {endpoint}")
+    print()
+
+    try:
+        # Initialize S3 client for DigitalOcean Spaces
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+
+        # Directories to create (S3 uses empty objects with / suffix)
+        directories = [
+            'import/',
+            'export/',
+            'metadata/',
+            'metadata/users/',
+            'metadata/workspaces/',
+            'metadata/config/',
+            'users/',  # For user-specific data
+            'temp/',   # For temporary files
+        ]
+
+        created_count = 0
+
+        for directory in directories:
+            try:
+                # Create directory by uploading empty object with / suffix
+                s3_client.put_object(
+                    Bucket=bucket,
+                    Key=directory,
+                    Body=b'',
+                    ContentType='application/x-directory'
+                )
+                print(f"✅ Created directory: {directory}")
+                created_count += 1
+
+            except Exception as e:
+                print(f"⚠️  Directory {directory} might already exist: {e}")
+
+        print()
+        print(f"📁 Directory setup complete!")
+        print(f"📊 Total directories processed: {len(directories)}")
+        print(f"✅ Newly created: {created_count}")
+        print()
+
+        # List the created directories to verify
+        print("🔍 Verifying directory structure:")
+        response = s3_client.list_objects_v2(
+            Bucket=bucket,
+            Delimiter='/',
+            MaxKeys=100
+        )
+
+        if 'CommonPrefixes' in response:
+            for prefix in response['CommonPrefixes']:
+                print(f"  📂 {prefix['Prefix']}")
+        else:
+            print("  ℹ️  No top-level directories found")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error setting up Spaces directories: {e}")
+        return False
+
+def test_spaces_access():
+    """Test basic access to DigitalOcean Spaces."""
+
+    access_key = os.getenv('S3_ACCESS_KEY')
+    secret_key = os.getenv('S3_SECRET_KEY')
+    bucket = os.getenv('S3_BUCKET', 'tanachat')
+    region = os.getenv('S3_REGION', 'nyc3')
+    endpoint = os.getenv('S3_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+
+    if not access_key or not secret_key:
+        print("❌ S3 credentials not available for testing")
+        return False
+
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+
+        # Test bucket access
+        s3_client.head_bucket(Bucket=bucket)
+        print(f"✅ Successfully connected to bucket: {bucket}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Cannot access bucket {bucket}: {e}")
+        return False
+
+def main():
+    """Main setup function."""
+    print("🚀 TanaChat Spaces Directory Setup")
+    print("=" * 40)
+    print()
+
+    # Test access first
+    if not test_spaces_access():
+        print()
+        print("💡 To fix this, ensure these environment variables are set:")
+        print("   export S3_ACCESS_KEY='your-access-key'")
+        print("   export S3_SECRET_KEY='your-secret-key'")
+        print("   export S3_BUCKET='tanachat'")
+        print("   export S3_REGION='nyc3'")
+        print("   export S3_ENDPOINT='https://nyc3.digitaloceanspaces.com'")
+        print()
+        sys.exit(1)
+
+    print()
+
+    # Setup directories
+    success = setup_spaces_directories()
+
+    if success:
+        print()
+        print("🎉 Spaces setup completed successfully!")
+        print()
+        print("📌 Next steps:")
+        print("   1. Test file upload/download functionality")
+        print("   2. Verify CORS configuration if needed")
+        print("   3. Update application to use new directory structure")
+    else:
+        print()
+        print("❌ Spaces setup failed!")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

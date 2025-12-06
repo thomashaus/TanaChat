@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tanachat": {
+      "command": "python",
+      "args": ["-m", "tanachat.server"],
+      "env": {}
+    }
+  }
+}

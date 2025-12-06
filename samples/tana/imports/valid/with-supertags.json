@@ -1,0 +1,53 @@
+{
+  "version": "TanaIntermediateFile V0.1",
+  "nodes": [
+    {
+      "uid": "project-1",
+      "name": "Website Redesign",
+      "description": "Complete redesign of company website",
+      "created": "2024-01-15T09:00:00.000Z",
+      "edited": "2024-01-20T14:30:00.000Z",
+      "type": "node",
+      "supertags": [
+        {
+          "uid": "tag-project",
+          "name": "Project"
+        },
+        {
+          "uid": "tag-active",
+          "name": "Active"
+        }
+      ],
+      "children": [
+        {
+          "uid": "task-1",
+          "name": "Design mockups",
+          "created": "2024-01-15T09:15:00.000Z",
+          "edited": "2024-01-18T16:45:00.000Z",
+          "type": "node",
+          "todoState": "done",
+          "supertags": [
+            {
+              "uid": "tag-task",
+              "name": "Task"
+            }
+          ]
+        },
+        {
+          "uid": "task-2",
+          "name": "Implement frontend",
+          "created": "2024-01-16T10:00:00.000Z",
+          "edited": "2024-01-20T14:30:00.000Z",
+          "type": "node",
+          "todoState": "todo",
+          "supertags": [
+            {
+              "uid": "tag-task",
+              "name": "Task"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

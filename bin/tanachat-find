@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""
+Tana Find - Find nodes by supertag in Tana imports
+A portable tool that works with any Tana workspace.
+
+Usage: tana-find [supertag] [options]
+"""
+
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import TanaIO, Colors
+
+
+def format_timestamp(ts):
+    """Format timestamp for display"""
+    if not ts:
+        return ""
+    try:
+        if isinstance(ts, (int, float)):
+            dt = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts)
+        elif isinstance(ts, str):
+            try:
+                dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            except:
+                dt = datetime.fromisoformat(ts)
+        return dt.strftime('%Y-%m-%d %H:%M')
+    except:
+        return str(ts)
+
+
+def find_supertags(data):
+    """Discover all supertags in the import"""
+    supertags = set()
+
+    def traverse(obj):
+        if isinstance(obj, dict):
+            if 'supertags' in obj:
+                for supertag in obj['supertags']:
+                    if isinstance(supertag, dict) and 'name' in supertag:
+                        supertags.add(supertag['name'])
+
+            for value in obj.values():
+                traverse(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                traverse(item)
+
+    traverse(data)
+    return sorted(list(supertags))
+
+
+def find_nodes_by_keyword(data, keyword):
+    """Find nodes containing keyword in name or description"""
+    nodes = []
+
+    def traverse(obj):
+        if isinstance(obj, dict):
+            # Check if this node contains the keyword
+            name = obj.get('name', '')
+            description = obj.get('description', '')
+
+            if keyword.lower() in name.lower() or keyword.lower() in description.lower():
+                node = {
+                    'name': name or '(unnamed)',
+                    'id': obj.get('uid', ''),
+                    'description': description,
+                    'created': obj.get('created', ''),
+                    'modified': obj.get('modified', '')
+                }
+                nodes.append(node)
+
+            # Recurse into children
+            for value in obj.values():
+                traverse(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                traverse(item)
+
+    traverse(data)
+    return nodes
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Find nodes by supertag or keyword in Tana import",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This tool works with Tana JSON imports and can find nodes in two ways:
+
+1. By supertag: tana-find --export file.json "supertag name"
+2. By keyword: tana-find --export file.json --search "keyword"
+
+Examples:
+  tana-find --export file.json                           # List all supertags
+  tana-find --export file.json "Atomic Note"           # Find nodes by supertag
+  tana-find --export file.json --search "project"        # Find nodes by keyword
+  tana-find --export file.json --search "project" -l 5    # Limit results
+
+If --export is not specified, the tool looks in ./files/import/ directory.
+        """
+    )
+
+    parser.add_argument("term", nargs="?", help="Supertag name or search keyword")
+    parser.add_argument("-e", "--export", help="Path to specific Tana import JSON file")
+    parser.add_argument("-l", "--limit", type=int, help="Limit number of results")
+    parser.add_argument("-f", "--format", choices=["table", "simple", "json"], default="table",
+                       help="Output format (default: table)")
+    parser.add_argument("--search", action="store_true", help="Search by keyword instead of supertag")
+    parser.add_argument("--sort", choices=["name", "date", "id"], default="name",
+                       help="Sort results (default: name)")
+    parser.add_argument("--stats", action="store_true", help="Show import statistics")
+    parser.add_argument("--list", action="store_true", help="List all available supertags")
+    parser.add_argument("--files-dir", help="Custom files directory (default: ./files)")
+
+    args = parser.parse_args()
+
+    # Initialize TanaIO with custom files directory if provided
+    tana_io = TanaIO(Path(args.files_dir) if args.files_dir else None)
+
+    # Find import file
+    if args.export:
+        export_path = Path(args.export)
+        if not export_path.exists():
+            Colors.error(f"Import file not found: {args.export}")
+    else:
+        # Use default import directory
+        try:
+            export_path = tana_io.find_latest_import()
+        except Exception as e:
+            Colors.error(str(e))
+
+    Colors.info(f"Using export: {export_path.name}")
+
+    # Load export using shared library
+    data = tana_io.load_tana_file(export_path)
+
+    # Show statistics if requested
+    if args.stats:
+        total_nodes = len(data.get('docs', [])) if 'docs' in data else 0
+        file_info = tana_io.get_file_info(export_path)
+        print(f"\n{Colors.CYAN}📊 Export Statistics:{Colors.END}")
+        print(f"  File: {file_info['name']}")
+        print(f"  Size: {file_info['size']:,} bytes")
+        print(f"  Total nodes: {total_nodes:,}")
+        print(f"  Modified: {file_info['modified']:%Y-%m-%d %H:%M}")
+
+    # List all supertags
+    if args.list:
+        supertags = find_supertags(data)
+        if not supertags:
+            Colors.warning("No supertags found in this export")
+            return
+
+        print(f"\n{Colors.CYAN}🏷️  Found {len(supertags)} supertags:{Colors.END}")
+        for i, supertag in enumerate(supertags, 1):
+            print(f"  {i:2d}. {Colors.BOLD}{supertag}{Colors.END}")
+
+        print(f"\n{Colors.BLUE}Usage:{Colors.END}")
+        print(f"  {Colors.YELLOW}tana-find{Colors.END} \"supertag name\"     # Find by supertag")
+        print(f"  {Colors.YELLOW}tana-find{Colors.END} --search \"keyword\"   # Find by keyword")
+        return
+
+    # Validate search term
+    if not args.term:
+        parser.error("supertag name or search term is required (use --list to see available)")
+
+    # Search for nodes
+    if args.search:
+        nodes = find_nodes_by_keyword(data, args.term)
+        search_type = "keyword"
+    else:
+        # For supertag search, we'll do a simple text search
+        nodes = find_nodes_by_keyword(data, args.term)
+        search_type = "supertag"
+
+    if not nodes:
+        Colors.warning(f"No nodes found with {search_type}: {args.term}")
+        return
+
+    # Sort results
+    if args.sort == "name":
+        nodes.sort(key=lambda x: x['name'].lower())
+    elif args.sort == "date":
+        nodes.sort(key=lambda x: x['modified'] or x['created'] or '', reverse=True)
+    elif args.sort == "id":
+        nodes.sort(key=lambda x: x['id'])
+
+    # Apply limit
+    if args.limit:
+        nodes = nodes[:args.limit]
+
+    # Display results
+    if args.format == "json":
+        import json
+        print(json.dumps(nodes, indent=2, ensure_ascii=False))
+    elif args.format == "simple":
+        for node in nodes:
+            line = node['name']
+            if node['id']:
+                line += f" ({node['id']})"
+            print(line)
+    else:  # table format (default)
+        print(f"\n{Colors.GREEN}📝 Found {len(nodes)} nodes with {search_type}: \"{args.term}\"{Colors.END}\n")
+
+        for i, node in enumerate(nodes, 1):
+            print(f"{i:2d}. {Colors.BOLD}{node['name']}{Colors.END}")
+
+            if node['description']:
+                desc = node['description'][:80] + '...' if len(node['description']) > 80 else node['description']
+                print(f"    📄 {desc}")
+
+            if node['modified']:
+                date_str = format_timestamp(node['modified'])
+                print(f"    🕒 {date_str}")
+
+        if args.limit and len(nodes) >= args.limit:
+            print(f"\n{Colors.YELLOW}📊 Showing first {args.limit} results{Colors.END}")
+        else:
+            print(f"\n{Colors.BLUE}📊 Total: {len(nodes)} nodes{Colors.END}")
+
+
+if __name__ == "__main__":
+    main()
