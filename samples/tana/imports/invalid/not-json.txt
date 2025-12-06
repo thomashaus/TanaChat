@@ -1,4 +1,0 @@
-This is not JSON
-It's just a plain text file
-with some random content
-that should fail validation
