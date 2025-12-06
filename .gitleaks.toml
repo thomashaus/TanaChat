@@ -22,8 +22,8 @@ tags = ["token", "digitalocean", "api"]
 
 [[rules]]
 id = "tana-api-key"
-description = "Tana API key pattern"
-regex = '''(?i)(^|[^a-zA-Z0-9])tan[a-zA-Z0-9]{20,}([^a-zA-Z0-9]|$)'''
+description = "Tana API key pattern - more specific to avoid class names"
+regex = '''(?i)(^|[^a-zA-Z0-9])(tana_api_key|tanaapikey|tana-key)\s*[=:]\s*['"]?[a-zA-Z0-9]{20,}['"]?([^a-zA-Z0-9]|$)'''
 tags = ["key", "tana", "api"]
 
 [[rules]]
