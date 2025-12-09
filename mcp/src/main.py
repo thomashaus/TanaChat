@@ -10,9 +10,10 @@ from typing import Any, Dict, List
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import uvicorn
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -23,8 +24,76 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class CreateUserRequest(BaseModel):
+    """Create user request model."""
+    username: str
+    password: str
+    email: str
+    name: str = None
+    tana_api_key: str = None
+    node_id: str = None
+
+class UpdateUserRequest(BaseModel):
+    """Update user request model."""
+    email: str = None
+    name: str = None
+    tana_api_key: str = None
+    password: str = None
+    is_active: bool = None
+    node_id: str = None
+
 from src.config import settings
-from src.server import mcp
+# from src.server import mcp  # Commented out to avoid fastmcp dependency for user management
+from lib.s3_user_manager import S3UserManager
+
+# Security
+security = HTTPBearer()
+
+# Authentication functions
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user from API token."""
+    try:
+        token = credentials.credentials
+        user_manager = S3UserManager()
+        user = user_manager.verify_api_token(token)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired API token"
+            )
+        return user
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication"
+        )
+
+async def get_mcp_user(request: Request):
+    """Get user from MCP request Authorization header."""
+    try:
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Valid Bearer token required"
+            )
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        user_manager = S3UserManager()
+        user = user_manager.verify_api_token(token)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired API token"
+            )
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication"
+        )
 
 # Configure logging
 logging.basicConfig(
@@ -32,13 +101,49 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
+# Validate required environment variables on startup
+def validate_environment():
+    """Validate required environment variables"""
+    required_vars = [
+        ("S3_ACCESS_KEY", settings.s3_access_key),
+        ("S3_SECRET_KEY", settings.s3_secret_key),
+        ("S3_BUCKET", settings.s3_bucket),
+        ("S3_ENDPOINT", settings.s3_endpoint),
+        ("S3_REGION", settings.s3_region)
+    ]
+
+    missing_vars = [var_name for var_name, var_value in required_vars if not var_value]
+
+    if missing_vars:
+        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+        logging.error(error_msg)
+        raise ValueError(error_msg)
+
+# Validate environment on startup
+try:
+    validate_environment()
+    logging.info("Environment variables validated successfully")
+except ValueError as e:
+    logging.error(f"Environment validation failed: {str(e)}")
+    # We'll let the app start but endpoints will fail with proper 500 errors
+
 # Create FastAPI app
 app = FastAPI(
     title="TanaChat API & MCP Server",
     description="API server and MCP endpoint for Tana workspace management - Updated with real functionality",
     version="0.1.1",
-    docs_url=None,  # Disable default docs
-    redoc_url=None  # Disable default docs
+    docs_url="/docs",  # Enable docs
+    redoc_url="/redoc",  # Enable redoc
+    openapi_components={
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "Enter your Bearer token"
+            }
+        }
+    }
 )
 
 # Configure CORS
@@ -385,6 +490,180 @@ async def get_current_user():
         "created_at": "2025-12-06T04:55:00Z"
     }
 
+@app.get("/api/test-endpoint", tags=["Test"])
+async def test_endpoint():
+    """Test endpoint to verify registration."""
+    return {"message": "Test endpoint working!", "timestamp": "2025-12-08"}
+
+# User Management endpoints
+@app.get("/api/users", tags=["Users"], dependencies=[Depends(get_current_user)])
+async def list_users():
+    """List all users (requires authentication)."""
+    try:
+        user_manager = S3UserManager()
+        users = user_manager.list_users()
+        return {
+            "users": users,
+            "count": len(users)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list users: {str(e)}")
+
+@app.get("/api/users/{username}", tags=["Users"], dependencies=[Depends(get_current_user)])
+async def get_user(username: str):
+    """Get specific user by username (requires authentication)."""
+    try:
+        user_manager = S3UserManager()
+        user = user_manager.get_user(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
+
+@app.post("/api/users", tags=["Users"])
+async def create_user(user_data: CreateUserRequest):
+    """Create a new user."""
+    try:
+        user_manager = S3UserManager()
+
+        # Check if user already exists
+        existing_user = user_manager.get_user(user_data.username)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already exists")
+
+        # Create the user
+        user = user_manager.create_user(
+            name=user_data.name or user_data.username,
+            username=user_data.username,
+            password=user_data.password,
+            email=user_data.email,
+            tana_api_key=user_data.tana_api_key or "default_key"
+        )
+
+        # Update node_id if provided
+        if user_data.node_id:
+            user_manager.update_user(user_data.username, {"node_id": user_data.node_id})
+            updated_user = user_manager.get_user(user_data.username)
+        else:
+            updated_user = user
+
+        return {
+            "message": "User created successfully",
+            "user": updated_user
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+
+@app.post("/api/users/{username}/generate-token", tags=["Users"])
+async def generate_api_token(username: str):
+    """Generate API token for user."""
+    try:
+        user_manager = S3UserManager()
+
+        # Check if user exists
+        user = user_manager.get_user(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Generate API token
+        api_token = user_manager.generate_api_token(username)
+
+        return {
+            "message": "API token generated successfully",
+            "api_token": api_token,
+            "username": username
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate API token: {str(e)}")
+
+@app.put("/api/users/{username}", tags=["Users"])
+async def update_user(username: str, updates: UpdateUserRequest):
+    """Update user information."""
+    try:
+        user_manager = S3UserManager()
+
+        # Check if user exists
+        existing_user = user_manager.get_user(username)
+        if not existing_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Prepare update data
+        update_data = {}
+        if updates.email is not None:
+            update_data["email"] = updates.email
+        if updates.name is not None:
+            update_data["name"] = updates.name
+        if updates.tana_api_key is not None:
+            update_data["tana_api_key"] = updates.tana_api_key
+        if updates.password is not None:
+            update_data["password"] = updates.password
+        if updates.is_active is not None:
+            update_data["is_active"] = updates.is_active
+        if updates.node_id is not None:
+            update_data["node_id"] = updates.node_id
+
+        # Update the user
+        success = user_manager.update_user(username, update_data)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update user")
+
+        updated_user = user_manager.get_user(username)
+
+        return {
+            "message": "User updated successfully",
+            "user": updated_user
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update user: {str(e)}")
+
+@app.delete("/api/users/{username}", tags=["Users"])
+async def delete_user(username: str):
+    """Delete a user."""
+    try:
+        user_manager = S3UserManager()
+
+        # Check if user exists
+        existing_user = user_manager.get_user(username)
+        if not existing_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Delete the user
+        success = user_manager.delete_user(username)
+
+        if success:
+            return {
+                "message": "User deleted successfully",
+                "username": username
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete user")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
 # Spaces management endpoints
 @app.post("/api/spaces/setup", tags=["Spaces"])
 async def setup_spaces():
@@ -421,10 +700,15 @@ async def list_spaces():
 # MCP Protocol Endpoint (for ChatGPT/Claude Desktop)
 @app.post("/mcp", tags=["MCP"])
 @app.post("/", tags=["MCP"], include_in_schema=False)  # Alternative endpoint for some MCP clients
-async def handle_mcp(request: MCPRequest):
+async def handle_mcp(request: MCPRequest, http_request: Request):
     """Handle MCP protocol requests."""
     try:
-        logging.info(f"MCP Request: {request.method}")
+        # Skip authentication for initialize method
+        if request.method != "initialize":
+            current_user = await get_mcp_user(http_request)
+            logging.info(f"MCP Request: {request.method} from user {current_user.get('username', 'unknown')}")
+        else:
+            logging.info(f"MCP Request: {request.method}")
 
         # Process the MCP request
         if request.method == "initialize":
