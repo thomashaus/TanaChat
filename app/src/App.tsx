@@ -14,6 +14,9 @@ import { BackgroundGraph } from './components/BackgroundGraph';
 import { Privacy } from './components/Privacy';
 import { Terms } from './components/Terms';
 import { AuthProvider } from './hooks/useAuth';
+import { AuthGuard } from './components/AuthGuard';
+import { Dashboard } from './components/Dashboard';
+import { Users } from './components/Users';
 
 function App() {
   return (
@@ -26,6 +29,22 @@ function App() {
           <Route path="/chat" element={<ChatInterface />} />
           <Route path="/signin" element={<SignIn />} />
           <Route path="/signup" element={<SignUp />} />
+          <Route
+            path="/dashboard"
+            element={
+              <AuthGuard>
+                <Dashboard />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <AuthGuard>
+                <Users />
+              </AuthGuard>
+            }
+          />
           <Route path="/profile" element={<Profile />} />
           <Route path="/health" element={<HealthDashboard />} />
           <Route path="/docs" element={<SwaggerUI />} />

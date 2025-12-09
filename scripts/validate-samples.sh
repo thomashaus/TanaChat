@@ -3,6 +3,9 @@
 
 set -e
 
+# Usage: scripts/validate-samples.sh [local|production]
+TARGET=${1:-local}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 SAMPLES_DIR="$PROJECT_ROOT/samples"
@@ -26,7 +29,7 @@ if ! command -v ajv &> /dev/null; then
     echo "Install with: npm install -g ajv-cli"
 fi
 
-echo "🔍 Validating sample files..."
+echo "🔍 Validating sample files for $TARGET environment..."
 
 # Validate JSON syntax
 echo -e "\n${GREEN}--- JSON Syntax Validation ---${NC}"

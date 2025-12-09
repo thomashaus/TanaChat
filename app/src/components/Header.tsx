@@ -46,6 +46,12 @@ export function Header({ title = 'TanaChat' }: HeaderProps) {
             >
               MCP
             </Link>
+            <Link
+              to="/users"
+              className="text-tana-text hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+              Users
+            </Link>
             <button
               onClick={handleLogout}
               className="text-tana-text hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"

@@ -1,7 +1,10 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Setting up TanaChat.ai development environment..."
+# Usage: scripts/setup.sh [local|production]
+TARGET=${1:-local}
+
+echo "🚀 Setting up TanaChat.ai $TARGET environment..."
 
 # Check for required tools
 command -v node >/dev/null 2>&1 || { echo "❌ Node.js required. Install from https://nodejs.org"; exit 1; }
@@ -18,11 +21,15 @@ fi
 echo "📦 Setting up www..."
 cd app && npm install && cd ..
 
-# Setup api
-echo "🐍 Setting up api..."
-cd api && uv sync && cd ..
+# Setup directories based on target
+if [ "$TARGET" = "production" ]; then
+    echo "🏭 Production setup detected"
+    # Additional production-specific setup can go here
+else
+    echo "🏠 Local development setup detected"
+fi
 
-# Setup mcp
+# Setup mcp (main API)
 echo "🔌 Setting up mcp..."
 cd mcp && uv sync && cd ..
 

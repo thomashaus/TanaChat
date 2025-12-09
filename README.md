@@ -110,17 +110,25 @@ VITE_API_URL=http://localhost:8000
 
 ### 3. Start Development Services
 
+**Option 1: Automated Build & Deploy (Recommended)**
 ```bash
-# Option 1: Docker Local Development (Recommended)
-docker-compose -f local/docker-compose.yml up -d
+# Complete pipeline: build and run everything locally with validation
+./scripts/build-and-deploy.sh local
+```
 
-# Option 2: Native Development
+**Option 2: Using Make Commands**
+```bash
+# Start all services with docker-compose
 make dev
 
 # Or start individual services:
 make dev-app    # Frontend only (http://localhost:5173)
 make dev-api    # API only (http://localhost:8000)
-make dev-mcp    # MCP server only (http://localhost:8001)
+```
+
+**Option 3: Docker Local Development**
+```bash
+docker-compose -f local/docker-compose.yml up -d
 ```
 
 ### 4. Setup LocalStack for Docker Development
@@ -180,6 +188,17 @@ TanaChat/
 
 ### Development Commands
 
+#### Build & Deploy Scripts
+```bash
+# Complete pipeline (recommended)
+./scripts/build-and-deploy.sh [local|production]
+
+# Individual operations
+./scripts/build.sh [local|production]
+./scripts/deploy.sh [local|production]
+```
+
+#### Traditional Make Commands
 ```bash
 # Setup
 make setup              # Install all dependencies
@@ -189,12 +208,10 @@ make clean              # Clean build artifacts
 make dev                # Start all services
 make dev-app            # Frontend development server
 make dev-api            # API development server
-make dev-mcp            # MCP server development
 
 # Testing
 make test               # Run all tests
 make test-api           # API tests only
-make test-mcp           # MCP tests only
 make test-app           # Frontend tests only
 make coverage           # Generate coverage report
 
@@ -206,18 +223,12 @@ make format             # Format all code
 
 # Building
 make build              # Build for production
-make build-app          # Build frontend
-make build-api          # Build API
-make build-mcp          # Build MCP server
+```
 
-# Database
-make db-init            # Initialize database
-make db-migrate         # Run migrations
-make db-reset           # Reset database
-
-# Deployment
-make deploy             # Deploy to production
-make deploy-staging     # Deploy to staging
+#### Production Deployment
+```bash
+# Requires PROD_TOKEN and PROD_REGISTRY_NAME environment variables
+./scripts/build-and-deploy.sh production
 ```
 
 ### Working with the MCP Server
@@ -226,12 +237,12 @@ The MCP (Model Context Protocol) server provides tools for AI assistants:
 
 ```bash
 # Test MCP server
-curl -X POST http://localhost:8001/mcp \
+curl -X POST http://localhost:8000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
 
 # Call a tool
-curl -X POST http://localhost:8001/mcp \
+curl -X POST http://localhost:8000/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -329,38 +340,42 @@ docker run -p 8001:8000 tanachat-mcp:latest
 
 ## 🚀 Deployment
 
-### DigitalOcean App Platform (Recommended)
+### Quick Deployment
 
-1. **Set up Environment:**
+**Production Deployment:**
+```bash
+# Build, push to registry, and deploy to DigitalOcean
+./scripts/build-and-deploy.sh production
+```
+
+**Local Development:**
+```bash
+# Build and run everything locally
+./scripts/build-and-deploy.sh local
+```
+
+### DigitalOcean App Platform (Production)
+
+The automated deployment requires:
+
+1. **Environment Variables:**
+   ```bash
+   export PROD_TOKEN=your_digitalocean_api_token
+   export PROD_REGISTRY_NAME=registry.digitalocean.com/tanachat
+   ```
+
+2. **Configuration Files:**
+   - `.do/appspec.yaml` - App Platform specification
+   - `.do/env.local` - Production environment variables (git-ignored)
+
+3. **Deploy:**
    ```bash
    cd .do
-   cp env.example env.local
-   # Edit env.local with your credentials
+   ./build-images.sh  # Build and push to registry
+   ./deploy.sh production  # Deploy to App Platform
    ```
 
-2. **Deploy using CLI:**
-   ```bash
-   # Install doctl
-   curl -sL https://github.com/digitalocean/doctl/releases/latest/download/doctl-$(uname -s)-$(uname -m).tar.gz | tar xz
-   sudo mv doctl /usr/local/bin/
-
-   # Authenticate
-   doctl auth init
-
-   # Deploy
-   doctl apps create --spec appspec.yaml
-   ```
-
-3. **Configure Environment Variables:**
-   - Set up secrets in App Platform console
-   - Configure domains and networking
-
-4. **Monitor Deployment:**
-   ```bash
-   # Check deployment status
-   doctl apps list
-   doctl apps list-deployments <app-id>
-   ```
+For detailed configuration, see [Deployment Guide](docs/development/deployment.md).
 
 ### Environment Variables for Production
 
@@ -547,8 +562,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📚 Documentation
 
-- **[Local Development Guide](docs/LOCAL_DEVELOPMENT.md)** - Complete LocalStack setup and troubleshooting
-- **[MCP Client Setup](docs/MCP_CLIENT_SETUP.md)** - Configure Claude Desktop, Claude Code, and ChatGPT
+- **[Complete Documentation](docs/)** - Comprehensive guides and references
+- **[Development Setup](docs/development/setup.md)** - Local development environment
+- **[Build Scripts](docs/development/scripts.md)** - Build and deployment automation
+- **[Deployment Guide](docs/development/deployment.md)** - Production deployment
+- **[MCP Server](docs/mcp/setup.md)** - AI assistant integration
 
 ## 🔗 Links
 

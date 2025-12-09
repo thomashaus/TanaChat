@@ -60,6 +60,7 @@ services:
       - S3_BUCKET=tanachat-local
     volumes:
       - ../mcp/src:/app/src
+      - ../mcp/lib:/app/lib
       - ../mcp/pyproject.toml:/app/pyproject.toml
       - ../mcp/uv.lock:/app/uv.lock
     restart: unless-stopped

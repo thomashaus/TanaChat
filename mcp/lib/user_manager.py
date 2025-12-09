@@ -104,8 +104,10 @@ class UserManager:
 
         # Create user data
         user_id = secrets.token_urlsafe(8)
+        node_id = f"node_{user_id}"  # Generate default NodeId
         user_data = {
             "id": user_id,
+            "node_id": node_id,
             "name": name,
             "username": username,
             "email": email,
@@ -199,7 +201,7 @@ class UserManager:
             return False
 
         # Update allowed fields
-        allowed_fields = ["name", "email", "tana_api_key", "preferences"]
+        allowed_fields = ["name", "email", "tana_api_key", "preferences", "node_id"]
         for field, value in updates.items():
             if field in allowed_fields:
                 users_data["users"][username][field] = value
@@ -217,6 +219,7 @@ class UserManager:
                 "username": username,
                 "name": user_data["name"],
                 "email": user_data["email"],
+                "node_id": user_data.get("node_id", ""),
                 "created_at": user_data["created_at"],
                 "last_login": user_data.get("last_login"),
                 "is_active": user_data.get("is_active", True)

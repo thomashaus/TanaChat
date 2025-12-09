@@ -25,6 +25,7 @@ RUN uv sync --frozen
 
 # Copy source code
 COPY src/ ./src/
+COPY lib/ ./lib/
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \

@@ -50,23 +50,30 @@ from lib.s3_user_manager import S3UserManager
 security = HTTPBearer()
 
 # Authentication functions
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current user from API token."""
+def verify_auth_token(request: Request) -> dict:
+    """Verify authentication token from request and return user data."""
     try:
-        token = credentials.credentials
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return None
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
         user_manager = S3UserManager()
         user = user_manager.verify_api_token(token)
-        if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid or expired API token"
-            )
         return user
-    except Exception as e:
+    except Exception:
+        return None
+
+def require_auth(request: Request):
+    """Simple authentication check that raises HTTPException if not authenticated."""
+    user = verify_auth_token(request)
+    if not user:
         raise HTTPException(
             status_code=401,
-            detail="Invalid authentication"
+            detail="Valid Bearer token required",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+    return user
 
 async def get_mcp_user(request: Request):
     """Get user from MCP request Authorization header."""
@@ -134,17 +141,62 @@ app = FastAPI(
     version="0.1.1",
     docs_url="/docs",  # Enable docs
     redoc_url="/redoc",  # Enable redoc
-    openapi_components={
-        "securitySchemes": {
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT",
-                "description": "Enter your Bearer token"
-            }
+)
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title="TanaChat API & MCP Server",
+        version="0.1.1",
+        description="API server and MCP endpoint for Tana workspace management - Updated with real functionality.<br/><br/>**Authentication**: Protected endpoints require a Bearer token (API token) in the Authorization header.",
+        routes=app.routes,
+    )
+
+    # Add security schemes
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your Bearer token (API token). Include 'Bearer ' prefix in the Authorization header."
         }
     }
-)
+
+    # Define protected endpoints based on actual implementation
+    # These endpoints use require_auth() or get_mcp_user() internally
+    protected_endpoints = [
+        # User management endpoints
+        ("/api/users", "get"),
+        ("/api/users", "post"),
+        ("/api/users/{username}", "get"),
+        ("/api/users/{username}", "put"),
+        ("/api/users/{username}", "delete"),
+        ("/api/users/{username}/generate-token", "post"),
+
+        # Spaces management endpoints
+        ("/api/spaces/setup", "post"),
+        ("/api/spaces/list", "get"),
+
+        # MCP protocol endpoint
+        ("/mcp", "post"),
+
+        # Authentication status endpoint
+        ("/api/auth/me", "get")
+    ]
+
+    # Add security requirements to protected endpoints
+    for path, method in protected_endpoints:
+        if path in openapi_schema["paths"] and method in openapi_schema["paths"][path]:
+            endpoint = openapi_schema["paths"][path][method]
+            if "security" not in endpoint:
+                endpoint["security"] = [{"BearerAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # Configure CORS
 # Parse comma-separated origins string into list
@@ -496,9 +548,11 @@ async def test_endpoint():
     return {"message": "Test endpoint working!", "timestamp": "2025-12-08"}
 
 # User Management endpoints
-@app.get("/api/users", tags=["Users"], dependencies=[Depends(get_current_user)])
-async def list_users():
+@app.get("/api/users", tags=["Users"])
+async def list_users(request: Request):
     """List all users (requires authentication)."""
+    # Manual authentication check
+    require_auth(request)
     try:
         user_manager = S3UserManager()
         users = user_manager.list_users()
@@ -528,8 +582,10 @@ async def get_user(username: str):
         raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
 
 @app.post("/api/users", tags=["Users"])
-async def create_user(user_data: CreateUserRequest):
+async def create_user(request: Request, user_data: CreateUserRequest):
     """Create a new user."""
+    # Manual authentication check
+    require_auth(request)
     try:
         user_manager = S3UserManager()
 
@@ -565,7 +621,7 @@ async def create_user(user_data: CreateUserRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
-@app.post("/api/users/{username}/generate-token", tags=["Users"])
+@app.post("/api/users/{username}/generate-token", tags=["Users"], dependencies=[Depends(get_current_user)])
 async def generate_api_token(username: str):
     """Generate API token for user."""
     try:
@@ -666,8 +722,10 @@ async def delete_user(username: str):
 
 # Spaces management endpoints
 @app.post("/api/spaces/setup", tags=["Spaces"])
-async def setup_spaces():
+async def setup_spaces(request: Request):
     """Setup directory structure in DigitalOcean Spaces."""
+    # Manual authentication check
+    require_auth(request)
     from .utils.spaces_setup import setup_spaces_directories
 
     result = setup_spaces_directories()
@@ -682,8 +740,10 @@ async def setup_spaces():
         raise HTTPException(status_code=500, detail=result["error"])
 
 @app.get("/api/spaces/list", tags=["Spaces"])
-async def list_spaces():
+async def list_spaces(request: Request):
     """List directories in DigitalOcean Spaces."""
+    # Manual authentication check
+    require_auth(request)
     from .utils.spaces_setup import list_spaces_directories
 
     result = list_spaces_directories()

@@ -1,11 +1,31 @@
 #!/bin/bash
-# Seed LocalStack with sample Tana files
+# Seed environment with sample Tana files
 
 set -e
+
+# Usage: scripts/seed-samples.sh [local|production]
+TARGET=${1:-local}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 SAMPLES_DIR="$PROJECT_ROOT/samples"
+
+# Load environment variables
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+elif [ -f "$PROJECT_ROOT/.env.local" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env.local"
+    set +a
+fi
+
+# Set defaults for environment variables
+S3_MAIN_BUCKET=${S3_MAIN_BUCKET:-tanachat}
+S3_TANA_FILES_BUCKET=${S3_TANA_FILES_BUCKET:-tanachat-tana-files}
+S3_UPLOADS_BUCKET=${S3_UPLOADS_BUCKET:-tanachat-uploads}
+S3_ENDPOINT=${S3_ENDPOINT:-http://localhost:4566}
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -13,36 +33,49 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo "🌱 Seeding LocalStack with sample files..."
+echo "🌱 Seeding $TARGET environment with sample files..."
 
-# Check if LocalStack is running
-if ! docker ps | grep -q "localstack/localstack"; then
-    echo -e "${YELLOW}Warning: LocalStack not running. Start it with:${NC}"
-    echo "  docker-compose up -d localstack"
-    echo "  Or run: make dev"
-    exit 1
+# Check environment and appropriate storage
+if [ "$TARGET" = "production" ]; then
+    echo "  Production environment detected - using real S3"
+    S3_ENDPOINT="https://s3.amazonaws.com"
+    # Check AWS credentials
+    if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+        echo -e "${RED}Error: AWS credentials required for production${NC}"
+        echo "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"
+        exit 1
+    fi
+else
+    echo "  Local environment detected - using LocalStack"
+    # Check if LocalStack is running
+    if ! docker ps | grep -q "localstack/localstack"; then
+        echo -e "${YELLOW}Warning: LocalStack not running. Start it with:${NC}"
+        echo "  docker-compose up -d localstack"
+        echo "  Or run: make dev"
+        exit 1
+    fi
+
+    # Wait for LocalStack to be ready
+    echo -n "  Waiting for LocalStack to be ready ..."
+    for i in {1..30}; do
+        if aws --endpoint-url=$S3_ENDPOINT s3 ls &>/dev/null; then
+            echo -e " ${GREEN}✓${NC}"
+            break
+        fi
+        sleep 1
+        echo -n "."
+    done
 fi
 
-# Wait for LocalStack to be ready
-echo -n "  Waiting for LocalStack to be ready ..."
-for i in {1..30}; do
-    if aws --endpoint-url=http://localhost:4566 s3 ls &>/dev/null; then
-        echo -e " ${GREEN}✓${NC}"
-        break
-    fi
-    sleep 1
-    echo -n "."
-done
-
 # Create buckets if they don't exist
-BUCKETS=("tanachat" "tanachat-tana-files" "tanachat-uploads")
+BUCKETS=("$S3_MAIN_BUCKET" "$S3_TANA_FILES_BUCKET" "$S3_UPLOADS_BUCKET")
 
 for bucket in "${BUCKETS[@]}"; do
     echo -n "  Creating bucket $bucket ... "
-    if aws --endpoint-url=http://localhost:4566 s3 ls "s3://$bucket" &>/dev/null; then
+    if aws --endpoint-url=$S3_ENDPOINT s3 ls "s3://$bucket" &>/dev/null; then
         echo -e "${YELLOW}Already exists${NC}"
     else
-        aws --endpoint-url=http://localhost:4566 s3 mb "s3://$bucket" &>/dev/null
+        aws --endpoint-url=$S3_ENDPOINT s3 mb "s3://$bucket" &>/dev/null
         echo -e "${GREEN}Created${NC}"
     fi
 done
@@ -58,14 +91,14 @@ upload_samples() {
         return
     fi
 
-    echo "  Uploading from $source_dir to s3://tanachat-tana-files/$target_prefix"
+    echo "  Uploading from $source_dir to s3://$S3_TANA_FILES_BUCKET/$target_prefix"
 
     find "$source_dir" -name "*.json" -type f | while read -r file; do
         relative_path="${file#$source_dir/}"
         target_key="$target_prefix/$relative_path"
 
         echo -n "    $relative_path ... "
-        if aws --endpoint-url=http://localhost:4566 s3 cp "$file" "s3://tanachat-tana-files/$target_key" &>/dev/null; then
+        if aws --endpoint-url=$S3_ENDPOINT s3 cp "$file" "s3://$S3_TANA_FILES_BUCKET/$target_key" &>/dev/null; then
             echo -e "${GREEN}✓${NC}"
         else
             echo -e "${RED}✗${NC}"
@@ -110,12 +143,12 @@ EOF
 )
 
 echo "$metadata" > /tmp/sample-metadata.json
-aws --endpoint-url=http://localhost:4566 s3 cp /tmp/sample-metadata.json "s3://tanachat-tana-files/samples/metadata.json" &>/dev/null
+aws --endpoint-url=$S3_ENDPOINT s3 cp /tmp/sample-metadata.json "s3://$S3_TANA_FILES_BUCKET/samples/metadata.json" &>/dev/null
 echo -e "  ${GREEN}✓ Created metadata.json${NC}"
 
 # List uploaded files
 echo -e "\n${GREEN}--- Uploaded Files ---${NC}"
-aws --endpoint-url=http://localhost:4566 s3 ls --recursive "s3://tanachat-tana-files/samples/" | while read -r line; do
+aws --endpoint-url=$S3_ENDPOINT s3 ls --recursive "s3://$S3_TANA_FILES_BUCKET/samples/" | while read -r line; do
     echo "  $line"
 done
 
@@ -126,10 +159,10 @@ echo "  curl -X POST http://localhost:8000/api/tana/validate \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d @samples/tana/imports/valid/minimal.json"
 echo ""
-echo "  # Download sample from LocalStack"
-echo "  aws --endpoint-url=http://localhost:4566 s3 cp s3://tanachat-tana-files/samples/valid/minimal.json -"
+echo "  # Download sample from S3"
+echo "  aws --endpoint-url=$S3_ENDPOINT s3 cp s3://$S3_TANA_FILES_BUCKET/samples/valid/minimal.json -"
 echo ""
 echo "  # List all samples"
-echo "  aws --endpoint-url=http://localhost:4566 s3 ls s3://tanachat-tana-files/samples/"
+echo "  aws --endpoint-url=$S3_ENDPOINT s3 ls s3://$S3_TANA_FILES_BUCKET/samples/"
 
 echo -e "\n${GREEN}✓ Seeding complete!${NC}"
