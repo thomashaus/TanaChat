@@ -1,6 +1,6 @@
 # Build & Deploy Scripts
 
-TanaChat provides comprehensive automation scripts for building and deploying applications across different environments.
+TanaChat provides comprehensive automation scripts for building and deploying applications across different environments. All scripts include security validation and proper error handling.
 
 ## Script Overview
 
@@ -64,10 +64,11 @@ TanaChat provides comprehensive automation scripts for building and deploying ap
 
 ### build.sh
 1. **Frontend**: Build React application (development or production)
-2. **MCP**: Install Python dependencies and build API
+2. **MCP**: Install Python dependencies and build API using uv package manager
 3. **Docker**: Build container images (production only)
-4. **Registry**: Push images to registry (production only)
+4. **Registry**: Push images to DigitalOcean Container Registry (production only)
 5. **Security**: Run gitleaks security scan (production only)
+6. **Validation**: Verify image integrity and deployment readiness
 
 ### deploy.sh
 - **Local**: Start services with docker-compose
@@ -87,10 +88,26 @@ All scripts include:
 - Docker & docker-compose
 - Node.js 18+
 - Python 3.12+
-- uv (Python package manager)
+- uv (Python package manager) - Modern Python package manager for fast dependency resolution
 
 ### Production Deployment
 - All local requirements
-- DigitalOcean CLI (`doctl`)
-- Container registry access
-- Authenticated DigitalOcean account
+- DigitalOcean CLI (`doctl`) - For App Platform deployment
+- Container registry access - DigitalOcean Container Registry
+- Authenticated DigitalOcean account with appropriate permissions
+
+## 🔒 Security Features
+
+All production scripts include comprehensive security measures:
+
+### gitleaks Integration
+- **Secret Detection**: Scans for hardcoded API keys, tokens, and credentials
+- **Git History Analysis**: Checks committed files and git history
+- **Custom Rules**: TanaChat-specific security rules and patterns
+- **Pre-commit Validation**: Security scan before deployment
+
+### Environment Security
+- **Environment Variable Validation**: Ensures required secrets are properly configured
+- **Permission Checks**: Verifies file and directory permissions
+- **Network Security**: Validates container security configurations
+- **Access Control**: Proper user and service account permissions

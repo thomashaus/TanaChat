@@ -1,123 +1,147 @@
-# Tana Command Line Tools
+# TanaChat Command Line Tools
 
-Command-line utilities for working with Tana files and TanaChat.ai.
+Enhanced command-line utilities for comprehensive Tana workspace management, import/export, and analysis.
 
-## Available Tools
+## 🚀 Enhanced Import & Export Tools
+
+### Tana Import System
+- **`tanachat-importjson`** - **Enhanced** - Import Tana JSON exports with metanode detection, complete formatting preservation, and smart folder organization
+- **`tanachat-obsidian`** - **Completely rewritten** - Create comprehensive Obsidian vaults from Tana data (4,080+ user nodes, diary consolidation, YAML frontmatter)
+
+### Content & Analysis Tools
+- **`tanachat-keytags`** - Enhanced supertag management with comprehensive productivity supertag support (15+ types)
+- **tanachat-outline`** - Generate hierarchical outlines from Tana JSON exports
+- **tanachat-find`** - Advanced search across Tana imports with metadata filtering
+- **tanachat-analyze`** - Complete workspace analysis with detailed statistics
+- **tanachat-tags`** - Comprehensive tag and taxonomy management
+- **tanachat-convert`** - Convert between Markdown and Tana paste formats
 
 ### User Management
+- **`tanachat-createuser`** - Create new TanaChat.ai users
+- **tanachat-login`** - Authenticate with Tana API and get JWT token
 
-- **`tana-createuser`** - Create a new TanaChat.ai user
-- **`tana-login`** - Authenticate and get JWT token
+### Workspace Integration
+- **tanachat-post`** - Post content to external platforms
+- **tanachat-sync-spaces`** - Synchronize Tana spaces
+- `tanachat-setup-spaces` - Configure workspace and space settings
 
-### Tana File Operations
+## 🔥 Key Enhancements
 
-- **`tana-importjson`** - Import Tana JSON files and generate markdown exports
-- **`tana-update-keytags`** - Create keytags.json metadata file with supertags and node IDs
-- **`tana-find`** - Search Tana imports for nodes
-- **`tana-analyze`** - Analyze Tana workspace statistics
-- **tana-convert** - Convert Markdown to Tana paste format
-- **tana-tags** - Manage and analyze tags
-- **tana-post** - Post content to external platforms
+### Metanode Hierarchy Detection
+- Automatically discovers all user supertags (177+ found in typical workspaces)
+- Smart mapping through Tana's internal metanode structure
+- Preserves rich formatting and content relationships
+
+### Complete Formatting Preservation
+- Maintains bold, italics, links, HTML spans
+- Preserves Tana's native content structure
+- Creates Obsidian-compatible markdown with proper linking
+
+### Smart Organization
+- **Diary Consolidation**: Day/Week/Month/Year unified into diary folder
+- **Dynamic Folders**: Creates folders based on actual supertag usage
+- **Node ID Filenames**: Unique identification using `G4pITdVwJ2Be.md` format
+- **User Content Only**: Excludes all system nodes and internal structures
 
 ## Usage Examples
 
-### Import Tana JSON
-
+### Enhanced Import & Export
 ```bash
-# Interactive mode - lists all files and lets you choose
-./bin/tana-importjson
+# Import with complete formatting preservation
+./bin/tanachat-importjson -f private.json
 
-# Import specific file directly
-./bin/tana-importjson --file workspace-export.json
+# Create comprehensive Obsidian vault
+./bin/tanachat-obsidian -f private.json
 
-# Import without clearing export directory
-./bin/tana-importjson --file workspace-export.json --no-clear
+# Manage enhanced supertags
+./bin/tanachat-keytags --list
+./bin/tanachat-keytags --add "project" --node-id "G4pITdVwJ2Be"
 ```
 
-### Update KeyTags Metadata
-
+### Advanced Analysis
 ```bash
-# Analyze latest import file
-./bin/tana-update-keytags
+# Complete workspace analysis
+./bin/tanachat-analyze -f private.json
 
-# Scan all import files
-./bin/tana-update-keytags --scan-all
+# Advanced search with metadata
+./bin/tanachat-find --query "important" --supertag "project"
 
-# Include system supertags
-./bin/tana-update-keytags --include-system
-
-# Dry run to preview
-./bin/tana-update-keytags --dry-run
+# Generate structured outlines
+./bin/tanachat-outline --node-id "G4pITdVwJ2Be" --format tree
 ```
 
-### Create a User
-
+### User Management
 ```bash
-# Interactive mode
-./bin/tana-createuser
+# Create and authenticate users
+./bin/tanachat-createuser --username "newuser"
+./bin/tanachat-login
 
-# Non-interactive mode
-./bin/tana-createuser --name "John Doe" --username john --email john@example.com
-
-# From config file
-./bin/tana-createuser --config user.json
+# Manage workspace access
+./bin/tanachat-sync-spaces --list
+./bin/tanachat-setup-spaces --auto-config
 ```
 
-### Login
+## Quick Start
 
+1. **Make tools executable:**
 ```bash
-# Interactive password prompt
-./bin/tana-login john
-
-# Use stored token
-./bin/tana-login --show-token john
-
-# Validate token only
-./bin/tana-login --validate-only --token xyz
+chmod +x bin/tanachat-*
 ```
 
-### Find Nodes
-
+2. **Test with sample data:**
 ```bash
-# List supertags
-./bin/tana-find --list
+# Test enhanced import
+./bin/tanachat-importjson -f your-tana-export.json
 
-# Find by supertag
-./bin/tana-find "Project"
-
-# Search by keyword
-./bin/tana-find --search "design"
-
-# Use specific export file
-./bin/tana-find --export my-export.json "Task"
+# Create Obsidian vault
+./bin/tanachat-obsidian -f your-tana-export.json
 ```
 
-## Shared Library
+3. **Analyze results:**
+```bash
+# Check import summary
+cat files/export/import-summary.md
 
-All tools use the shared library in `./lib` for:
+# Browse Obsidian vault
+open files/export/obsidian
+```
 
-- **Consistent behavior** across CLI and API
-- **Centralized business logic**
-- **Unified file paths** (defaults to `./files`)
-- **Common utilities** (colors, error handling)
+## Integration Options
 
-## File Paths
+### MCP Tools
+All CLI functionality is also available through Model Context Protocol (MCP) tools:
+- Direct integration with AI assistants (Claude Desktop, Cursor)
+- Real-time content analysis and manipulation
+- Natural language workspace management
 
-- **Local Data**: `./files/` (default)
-  - Exports: `./files/exports/`
-  - Imports: `./files/imports/`
-  - User data: `./files/metadata/`
+### Automation
+- Scriptable interfaces for batch operations
+- JSON output for integration with other tools
+- Error handling and progress reporting
+- Security validation with gitleaks integration
 
-- **Configuration**: Override with `--files-dir` option
+## Requirements
 
-## Authentication
+### Python Environment
+- Python 3.12+ (recommended)
+- Standard library modules only for enhanced import system
+- No additional dependencies required for core functionality
 
-1. Create user with `tana-createuser`
-2. Login with `tana-login` to get JWT token
-3. Use token for API requests: `Authorization: Bearer <token>`
-4. Use token for MCP server configuration
+### Optional Dependencies
+- `uv` (for development and building)
+- Docker (for containerized deployment)
+- DigitalOcean CLI (for production deployment)
 
-## Environment Variables
+## Security
 
-- `TANACHAT_FILES_DIR`: Override default files directory
-- `TANACHAT_DEBUG`: Enable debug output
+All tools include comprehensive security measures:
+- **Input Validation**: Protects against malformed inputs
+- **Permission Checking**: Verifies file and directory access
+- **Gitleaks Integration**: Scans for hardcoded secrets (production mode)
+- **Environment Isolation**: Safe execution contexts
+
+## Support
+
+- **Documentation**: [docs/](../docs/) for comprehensive guides
+- **GitHub**: Issues and feature requests at [thomhas/TanaChat](https://github.com/thomhaus/TanaChat)
+- **Community**: Discord and community forums for user discussions

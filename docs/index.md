@@ -1,6 +1,6 @@
 # TanaChat Documentation
 
-**AI-powered platform with MCP server, API, and web interface for Tana workspace management.**
+**AI-powered platform with enhanced MCP server, API, and web interface for Tana workspace management with comprehensive import/export capabilities.**
 
 ## 📚 Documentation Sections
 
@@ -31,7 +31,16 @@ Guide for using the command-line tools for direct workspace management and autom
 ### [Web Interface](www/overview.md)
 Overview of the React-based frontend application.
 
+## 🆕 What's New
+
+### Enhanced Import & Export System
+- **🚀 Tana Import Tool**: Complete JSON import with metanode hierarchy detection and formatting preservation
+- **📚 Obsidian Export**: Comprehensive vault creation (4,080+ nodes, smart organization)
+- **🏷️ Dynamic Supertag Discovery**: Automatically finds all user supertags
+- **📅 Diary Consolidation**: Time-based content unified in smart folders
+
 ## 🚀 Quick Links
 
 - **GitHub Repository**: [thomashaus/TanaChat](https://github.com/thomashaus/TanaChat)
 - **Live Demo**: [tanachat.ai](https://tanachat.ai)
+- **Import Guide**: [CLI Tools Overview](bin/overview.md)
