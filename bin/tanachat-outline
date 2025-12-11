@@ -1,0 +1,792 @@
+#!/usr/bin/env python3
+"""
+TanaChat Outline Generator - Generate hierarchical outlines from Tana JSON exports
+
+This script analyzes Tana JSON exports and displays hierarchical outlines with various
+options for depth control, workspace filtering, and output formats.
+
+Usage:
+    tanachat-outline [options] [json_file]
+
+Examples:
+    tanachat-outline                           # Interactive file selection
+    tanachat-outline export.json               # Analyze specific file
+    tanachat-outline --depth 3 export.json     # Show 3 levels deep
+    tanachat-outline --workspace abc123 export.json  # Filter by workspace
+    tanachat-outline --stats export.json       # Show statistics
+    tanachat-outline --list export.json        # Simple list format
+"""
+
+import sys
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, List, Set, Optional, Any
+from collections import defaultdict
+from datetime import datetime
+
+# Add parent directory to path for shared libraries
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib import Colors, TanaIO
+from lib.tana_parser import TanaParser
+
+
+class TanaOutlineGenerator:
+    """
+    Generate hierarchical outlines from Tana JSON exports.
+
+    This class provides methods to analyze Tana JSON data and display
+    it in various outline formats with configurable depth and filtering.
+    """
+
+    def __init__(self, json_data: Dict, max_depth: int = 2, workspace_id: str = None,
+                 start_node: str = None):
+        """
+        Initialize the outline generator.
+
+        Args:
+            json_data: Parsed Tana JSON data
+            max_depth: Maximum depth to display (default: 2)
+            workspace_id: Optional workspace ID to filter nodes
+            start_node: Optional starting node ID
+        """
+        self.data = json_data
+        self.max_depth = max_depth
+        self.workspace_id = workspace_id
+        self.start_node = start_node
+        self.parser = TanaParser(json_data)
+        self.docs = {doc['id']: doc for doc in self.data.get('docs', [])}
+        self.root_nodes = []
+        self.processed_nodes = set()
+
+        # Statistics tracking
+        self.stats = {
+            'total_nodes': 0,
+            'system_nodes': 0,
+            'user_nodes': 0,
+            'node_types': defaultdict(int),
+            'max_depth_found': 0
+        }
+
+    def identify_root_nodes(self) -> List[str]:
+        """
+        Identify root nodes using multiple strategies.
+
+        Returns:
+            List of root node IDs sorted by priority
+        """
+        root_candidates = set()
+
+        # Strategy 1: Nodes with no parentId
+        for doc in self.docs.values():
+            if not doc.get('parentId'):
+                root_candidates.add(doc['id'])
+
+        # Strategy 2: If workspace specified, find nodes expanded in that workspace
+        if self.workspace_id and 'workspaces' in self.data:
+            workspaces = self.data['workspaces']
+            if self.workspace_id in workspaces:
+                try:
+                    workspace_info = json.loads(workspaces[self.workspace_id])
+                    expanded_nodes = workspace_info.get('expanded', [])
+
+                    # Extract node IDs from expanded paths
+                    for expanded_path in expanded_nodes:
+                        parts = expanded_path.split('+')
+                        if len(parts) >= 2:  # workspace + root-tab + node-id
+                            node_id = parts[-1]
+                            if node_id in self.docs:
+                                root_candidates.add(node_id)
+                except json.JSONDecodeError:
+                    Colors.warning(f"Failed to parse workspace info for {self.workspace_id}")
+
+        # Strategy 3: Filter out system nodes
+        user_root_nodes = []
+        for node_id in root_candidates:
+            if not node_id.startswith('SYS_'):
+                user_root_nodes.append(node_id)
+
+        # Strategy 4: Prioritize specific node types
+        prioritized = []
+        other = []
+
+        for node_id in user_root_nodes:
+            doc = self.docs.get(node_id, {})
+            doc_type = doc.get('props', {}).get('_docType', '')
+            name = doc.get('props', {}).get('name', '')
+
+            # Prioritize organizational nodes
+            if (doc_type in ['home', 'search'] or
+                name in ['Home', 'Areas', 'Projects', 'Vision', 'Calendar', 'Tasks', 'Library', 'Resources'] or
+                'Hub' in name):
+                prioritized.append(node_id)
+            else:
+                other.append(node_id)
+
+        self.root_nodes = prioritized + other
+        return self.root_nodes
+
+    def get_node_info(self, node_id: str) -> Dict[str, Any]:
+        """
+        Get formatted node information.
+
+        Args:
+            node_id: ID of the node
+
+        Returns:
+            Dictionary with node information
+        """
+        doc = self.docs.get(node_id, {})
+        if not doc:
+            return {
+                'name': 'Unknown',
+                'type': 'unknown',
+                'id': node_id,
+                'description': '',
+                'created': None,
+                'has_meta': False,
+                'has_owner': False
+            }
+
+        props = doc.get('props', {})
+        return {
+            'name': props.get('name', 'Unnamed'),
+            'type': props.get('_docType', 'unknown'),
+            'id': node_id,
+            'description': props.get('description', ''),
+            'created': props.get('created'),
+            'has_meta': '_metaNodeId' in props,
+            'has_owner': '_ownerId' in props
+        }
+
+    def get_children(self, node_id: str) -> List[str]:
+        """
+        Get direct children of a node sorted by creation time.
+
+        Args:
+            node_id: ID of the parent node
+
+        Returns:
+            List of child node IDs
+        """
+        children = []
+        for doc_id, doc in self.docs.items():
+            if doc.get('parentId') == node_id:
+                children.append(doc_id)
+
+        # Sort by creation time if available
+        def sort_key(doc_id):
+            doc = self.docs.get(doc_id, {})
+            created = doc.get('props', {}).get('created', 0)
+            return created if created else 0
+
+        children.sort(key=sort_key)
+        return children
+
+    def print_outline(self):
+        """Print the hierarchical outline with metadata."""
+        print("=" * 80)
+        print(f"{Colors.CYAN}🏗️  TANA OUTLINE ANALYSIS{Colors.END}")
+        print("=" * 80)
+
+        # Show workspace info
+        if 'currentWorkspaceId' in self.data:
+            print(f"{Colors.BOLD}Workspace ID:{Colors.END} {self.data['currentWorkspaceId']}")
+
+        # Calculate statistics
+        self._calculate_statistics()
+
+        print(f"{Colors.BOLD}Total nodes:{Colors.END} {self.stats['total_nodes']:,}")
+        print(f"{Colors.BOLD}System nodes:{Colors.END} {self.stats['system_nodes']:,}")
+        print(f"{Colors.BOLD}User nodes:{Colors.END} {self.stats['user_nodes']:,}")
+        print(f"{Colors.BOLD}Max depth:{Colors.END} {self.max_depth}")
+
+        # Show start node info if specified
+        if self.start_node:
+            print(f"{Colors.BOLD}Start node:{Colors.END} {self.start_node}")
+        print()
+
+        # If start node is specified, show only that node and its children
+        if self.start_node:
+            if self.start_node in self.docs:
+                info = self.get_node_info(self.start_node)
+                print(f"{Colors.GREEN}🎯 STARTING NODE:{Colors.END} {info['name']} ({info['type']})")
+                print("-" * 50)
+                print(f"{Colors.CYAN}🔗 ID:{Colors.END} {self.start_node}")
+
+                if info['description']:
+                    desc = info['description'][:80] + '...' if len(info['description']) > 80 else info['description']
+                    print(f"{Colors.YELLOW}📝{Colors.END} {desc}")
+
+                print()
+                self._print_children(self.start_node, depth=1)
+            else:
+                Colors.error(f"Start node '{self.start_node}' not found")
+            return
+
+        # Otherwise, identify and display root nodes
+        root_nodes = self.identify_root_nodes()
+
+        print(f"{Colors.GREEN}📑 ROOT NODES ({len(root_nodes)}):{Colors.END}")
+        print("-" * 50)
+
+        if not root_nodes:
+            Colors.warning("No root nodes found")
+            return
+
+        # Display each root node and its children
+        for i, root_id in enumerate(root_nodes[:20], 1):  # Limit to first 20 roots
+            info = self.get_node_info(root_id)
+            print(f"{i:2d}. {Colors.BOLD}{info['name']}{Colors.END} ({info['type']})")
+
+            if info['description']:
+                desc = info['description'][:80] + '...' if len(info['description']) > 80 else info['description']
+                print(f"     {Colors.YELLOW}📝{Colors.END} {desc}")
+
+            print(f"     {Colors.CYAN}🔗 ID:{Colors.END} {root_id}")
+
+            # Show children up to max_depth
+            self._print_children(root_id, depth=1)
+            print()
+
+        if len(root_nodes) > 20:
+            print(f"... and {len(root_nodes) - 20} more root nodes")
+
+    def _print_children(self, node_id: str, depth: int):
+        """
+        Recursively print children with depth limiting.
+
+        Args:
+            node_id: ID of the parent node
+            depth: Current depth level
+        """
+        if depth > self.max_depth:
+            return
+
+        children = self.get_children(node_id)
+        if not children:
+            return
+
+        # Limit children shown per node to prevent overwhelming output
+        max_children = 10
+        shown_children = children[:max_children]
+        remaining = len(children) - max_children
+
+        for i, child_id in enumerate(shown_children):
+            info = self.get_node_info(child_id)
+            indent = "    " * depth
+
+            # Node type icons
+            icon = "📄"
+            if info['type'] == 'search':
+                icon = "🔍"
+            elif info['type'] == 'home':
+                icon = "🏠"
+            elif info['type'] == 'tagDef':
+                icon = "🏷️"
+            elif info['has_meta']:
+                icon = "⚙️"
+
+            connector = '├─' if i < len(shown_children) - 1 or remaining > 0 else '└─'
+            print(f"{indent}{connector} {icon} {info['name']}")
+
+            # Show additional info for important nodes
+            if depth == 1 and info['description']:
+                desc = info['description'][:60] + '...' if len(info['description']) > 60 else info['description']
+                print(f"{indent}    │  {Colors.YELLOW}📝{Colors.END} {desc}")
+
+            # Recursively show children
+            self._print_children(child_id, depth + 1)
+
+        if remaining > 0:
+            indent = "    " * depth
+            print(f"{indent}└─ ... and {remaining} more children")
+
+    def print_home_children_list(self, max_depth: int = 1):
+        """
+        Print just the specified node and its children names.
+
+        Args:
+            max_depth: Maximum depth to display
+        """
+        # Use custom start node if specified, otherwise find Home node
+        start_node_id = None
+        start_node_name = None
+
+        if self.start_node:
+            start_node_id = self.start_node
+            if start_node_id in self.docs:
+                start_node_name = self.docs[start_node_id].get('props', {}).get('name', 'Unknown')
+            else:
+                Colors.error(f"Start node '{start_node_id}' not found")
+                return
+        else:
+            # Find the Home node (usually has docType 'home' or name 'Home')
+            for doc_id, doc in self.docs.items():
+                if not doc.get('parentId'):
+                    props = doc.get('props', {})
+                    doc_type = props.get('_docType', '')
+                    name = props.get('name', '')
+                    if doc_type == 'home' or name.lower() == 'home':
+                        start_node_id = doc_id
+                        start_node_name = name
+                        break
+
+        if not start_node_id:
+            Colors.error("Start node not found")
+            return
+
+        # Get start node info
+        start_info = self.get_node_info(start_node_id)
+        print(f"{Colors.GREEN}🎯 {start_info['name']}{Colors.END}")
+
+        # If using Home node, find children by ownership pattern
+        if not self.start_node:
+            # Find Home children by looking for root nodes owned by Home
+            home_children = []
+            for doc_id, doc in self.docs.items():
+                if not doc.get('parentId'):  # Root nodes only
+                    props = doc.get('props', {})
+                    owner_id = props.get('_ownerId')
+                    if owner_id == start_node_id:
+                        name = props.get('name', 'Unnamed')
+                        home_children.append((doc_id, name))
+
+            # Sort by creation time
+            home_children.sort(key=lambda x: self.docs.get(x[0], {}).get('props', {}).get('created', 0))
+
+            # Print Home children with optional depth
+            if home_children:
+                for child_id, name in home_children:
+                    print(f"  └─ {name}")
+                    # Show children of children if max_depth > 1
+                    if max_depth > 1:
+                        self._print_children_simple(child_id, depth=2, max_depth=max_depth)
+            else:
+                print("  └─ No children found")
+        else:
+            # For custom start nodes, use regular parent-child relationships
+            children = self.get_children(start_node_id)
+            if children:
+                for child_id in children:
+                    child_info = self.get_node_info(child_id)
+                    print(f"  └─ {child_info['name']}")
+                    # Show children of children if max_depth > 1
+                    if max_depth > 1:
+                        self._print_children_simple(child_id, depth=2, max_depth=max_depth)
+            else:
+                print("  └─ No children found")
+
+    def _print_children_simple(self, node_id: str, depth: int, max_depth: int):
+        """
+        Simple version of _print_children for --list option.
+
+        Args:
+            node_id: ID of the parent node
+            depth: Current depth level
+            max_depth: Maximum depth to display
+        """
+        if depth > max_depth:
+            return
+
+        children = self.get_children(node_id)
+        if not children:
+            return
+
+        # Limit children shown per node
+        max_children = 10
+        shown_children = children[:max_children]
+        remaining = len(children) - max_children
+
+        for i, child_id in enumerate(shown_children):
+            info = self.get_node_info(child_id)
+            indent = "    " * depth
+
+            connector = '├─' if i < len(shown_children) - 1 or remaining > 0 else '└─'
+            print(f"{indent}{connector} {info['name']}")
+
+            # Recursively show children
+            self._print_children_simple(child_id, depth + 1, max_depth)
+
+        if remaining > 0:
+            indent = "    " * depth
+            print(f"{indent}└─ ... and {remaining} more")
+
+    def print_statistics(self):
+        """Print detailed statistics about the outline."""
+        print("\n" + "=" * 80)
+        print(f"{Colors.CYAN}📊 OUTLINE STATISTICS{Colors.END}")
+        print("=" * 80)
+
+        # Node type distribution
+        print(f"{Colors.BOLD}Node Type Distribution:{Colors.END}")
+        for doc_type, count in sorted(self.stats['node_types'].items(), key=lambda x: x[1], reverse=True):
+            print(f"  {doc_type:20}: {count:6,}")
+
+        # Tree depth statistics
+        print(f"\n{Colors.BOLD}Tree Statistics:{Colors.END}")
+        print(f"  Max display depth: {self.max_depth}")
+        print(f"  Root nodes found: {len(self.root_nodes)}")
+        print(f"  Max actual depth: {self.stats['max_depth_found']}")
+
+        # Workspace information
+        if 'workspaces' in self.data:
+            print(f"\n{Colors.BOLD}Workspace Information:{Colors.END}")
+            for ws_id, ws_data in self.data['workspaces'].items():
+                print(f"  {ws_id}: {len(ws_data) if ws_data else 0} characters")
+
+    def _calculate_statistics(self):
+        """Calculate statistics about the outline."""
+        total_nodes = len(self.docs)
+        system_nodes = len([doc_id for doc_id in self.docs.keys() if doc_id.startswith('SYS_')])
+        user_nodes = total_nodes - system_nodes
+
+        self.stats['total_nodes'] = total_nodes
+        self.stats['system_nodes'] = system_nodes
+        self.stats['user_nodes'] = user_nodes
+
+        # Node type distribution
+        for doc in self.docs.values():
+            doc_type = doc.get('props', {}).get('_docType', 'unknown')
+            self.stats['node_types'][doc_type] += 1
+
+        # Calculate actual tree depth
+        if self.root_nodes:
+            for root_id in self.root_nodes[:10]:  # Sample first 10 roots
+                depth = self._calculate_depth(root_id, 0)
+                self.stats['max_depth_found'] = max(self.stats['max_depth_found'], depth)
+
+    def _calculate_depth(self, node_id: str, current_depth: int) -> int:
+        """
+        Calculate the maximum depth from a given node.
+
+        Args:
+            node_id: ID of the node
+            current_depth: Current depth level
+
+        Returns:
+            Maximum depth found
+        """
+        if node_id in self.processed_nodes or current_depth > 50:  # Prevent infinite loops
+            return current_depth
+
+        self.processed_nodes.add(node_id)
+
+        children = self.get_children(node_id)
+        if not children:
+            return current_depth
+
+        max_child_depth = current_depth
+        for child_id in children:
+            child_depth = self._calculate_depth(child_id, current_depth + 1)
+            max_child_depth = max(max_child_depth, child_depth)
+
+        return max_child_depth
+
+    def _generate_outline_text(self) -> str:
+        """Generate outline text as a string (for API usage)."""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("🏗️  TANA OUTLINE ANALYSIS")
+        lines.append("=" * 80)
+        lines.append("")
+
+        # Calculate statistics
+        self._calculate_statistics()
+
+        lines.append(f"Total nodes: {self.stats['total_nodes']:,}")
+        lines.append(f"System nodes: {self.stats['system_nodes']:,}")
+        lines.append(f"User nodes: {self.stats['user_nodes']:,}")
+        lines.append(f"Max depth: {self.max_depth}")
+
+        if self.start_node:
+            lines.append(f"Start node: {self.start_node}")
+        lines.append("")
+
+        # If start node is specified, show only that node and its children
+        if self.start_node:
+            if self.start_node in self.docs:
+                info = self.get_node_info(self.start_node)
+                lines.append(f"🎯 STARTING NODE: {info['name']} ({info['type']})")
+                lines.append("-" * 50)
+                lines.append(f"🔗 ID: {self.start_node}")
+                if info['description']:
+                    desc = info['description'][:80] + '...' if len(info['description']) > 80 else info['description']
+                    lines.append(f"📝 {desc}")
+                lines.append("")
+                lines.extend(self._generate_children_text(self.start_node, depth=1))
+            else:
+                lines.append(f"❌ Start node '{self.start_node}' not found")
+            return "\n".join(lines)
+
+        # Otherwise, identify and display root nodes
+        root_nodes = self.identify_root_nodes()
+        lines.append(f"📑 ROOT NODES ({len(root_nodes)}):")
+        lines.append("-" * 50)
+
+        if not root_nodes:
+            lines.append("No root nodes found")
+            return "\n".join(lines)
+
+        # Display each root node and its children
+        for i, root_id in enumerate(root_nodes[:20], 1):
+            info = self.get_node_info(root_id)
+            lines.append(f"{i:2d}. {info['name']} ({info['type']})")
+
+            if info['description']:
+                desc = info['description'][:80] + '...' if len(info['description']) > 80 else info['description']
+                lines.append(f"     📝 {desc}")
+
+            lines.append(f"     🔗 ID: {root_id}")
+            lines.extend(self._generate_children_text(root_id, depth=1))
+            lines.append("")
+
+        if len(root_nodes) > 20:
+            lines.append(f"... and {len(root_nodes) - 20} more root nodes")
+
+        return "\n".join(lines)
+
+    def _generate_children_text(self, node_id: str, depth: int) -> List[str]:
+        """Generate children text as a list of strings."""
+        lines = []
+        if depth > self.max_depth:
+            return lines
+
+        children = self.get_children(node_id)
+        if not children:
+            return lines
+
+        # Limit children shown per node
+        max_children = 10
+        shown_children = children[:max_children]
+        remaining = len(children) - max_children
+
+        for i, child_id in enumerate(shown_children):
+            info = self.get_node_info(child_id)
+            indent = "    " * depth
+
+            # Node type icons
+            icon = "📄"
+            if info['type'] == 'search':
+                icon = "🔍"
+            elif info['type'] == 'home':
+                icon = "🏠"
+            elif info['type'] == 'tagDef':
+                icon = "🏷️"
+            elif info['has_meta']:
+                icon = "⚙️"
+
+            connector = '├─' if i < len(shown_children) - 1 or remaining > 0 else '└─'
+            lines.append(f"{indent}{connector} {icon} {info['name']}")
+
+            # Show additional info for important nodes
+            if depth == 1 and info['description']:
+                desc = info['description'][:60] + '...' if len(info['description']) > 60 else info['description']
+                lines.append(f"{indent}    │  📝 {desc}")
+
+            # Recursively show children
+            lines.extend(self._generate_children_text(child_id, depth + 1))
+
+        if remaining > 0:
+            indent = "    " * depth
+            lines.append(f"{indent}└─ ... and {remaining} more children")
+
+        return lines
+
+    def _generate_stats_text(self) -> str:
+        """Generate statistics text as a string."""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("📊 OUTLINE STATISTICS")
+        lines.append("=" * 80)
+        lines.append("")
+
+        # Node type distribution
+        lines.append("Node Type Distribution:")
+        for doc_type, count in sorted(self.stats['node_types'].items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"  {doc_type:20}: {count:6,}")
+
+        # Tree depth statistics
+        lines.append("")
+        lines.append("Tree Statistics:")
+        lines.append(f"  Max display depth: {self.max_depth}")
+        lines.append(f"  Root nodes found: {len(self.root_nodes)}")
+        lines.append(f"  Max actual depth: {self.stats['max_depth_found']}")
+
+        # Workspace information
+        if 'workspaces' in self.data:
+            lines.append("")
+            lines.append("Workspace Information:")
+            for ws_id, ws_data in self.data['workspaces'].items():
+                lines.append(f"  {ws_id}: {len(ws_data) if ws_data else 0} characters")
+
+        return "\n".join(lines)
+
+
+def get_json_file(tana_io: TanaIO, specific_file: str = None) -> Optional[Path]:
+    """
+    Get JSON file from user selection or parameter.
+
+    Args:
+        tana_io: TanaIO instance for file management
+        specific_file: Optional specific file path
+
+    Returns:
+        Path to the selected JSON file or None if not found
+    """
+    if specific_file:
+        file_path = Path(specific_file)
+
+        # If relative path, check in import directory first
+        if not file_path.is_absolute():
+            import_dir_path = tana_io.import_dir / specific_file
+            if import_dir_path.exists():
+                file_path = import_dir_path
+
+        if not file_path.exists():
+            Colors.error(f"File not found: {specific_file}")
+            return None
+        return file_path
+
+    # List available files
+    import_files = list(tana_io.import_dir.glob("*.json"))
+    if not import_files:
+        Colors.error(f"No JSON files found in {tana_io.import_dir}")
+        return None
+
+    # Display files
+    print(f"\n{Colors.CYAN}📁 Available Tana JSON files:{Colors.END}")
+    for i, file_path in enumerate(import_files, 1):
+        size = file_path.stat().st_size
+        modified = file_path.stat().st_mtime
+        size_str = f"{size/1024/1024:.2f} MB" if size > 1024*1024 else f"{size/1024:.1f} KB"
+        mod_str = datetime.fromtimestamp(modified).strftime('%Y-%m-%d %H:%M')
+        print(f"   {i}. {Colors.BOLD}{file_path.name}{Colors.END}")
+        print(f"      Size: {size_str} | Modified: {mod_str}")
+
+    # Get user selection
+    while True:
+        try:
+            choice = input(f"\n{Colors.YELLOW}Select file (1-{len(import_files)}) or press Enter to cancel:{Colors.END} ").strip()
+            if not choice:
+                return None
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(import_files):
+                return import_files[idx]
+            else:
+                Colors.error(f"Please enter a number between 1 and {len(import_files)}")
+        except ValueError:
+            Colors.error("Please enter a valid number")
+
+
+def main():
+    """Main entry point for the outline generator."""
+    parser = argparse.ArgumentParser(
+        description='Generate hierarchical outline from Tana JSON export',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                                    # Interactive file selection
+  %(prog)s export.json                        # Analyze specific file
+  %(prog)s --depth 3 export.json              # Show 3 levels deep
+  %(prog)s --workspace abc123 export.json     # Filter by workspace
+  %(prog)s --stats export.json                # Show statistics
+  %(prog)s --list export.json                 # Simple list format
+  %(prog)s --start node123 export.json        # Start from specific node
+        """
+    )
+
+    parser.add_argument(
+        'json_file',
+        nargs='?',
+        help='Path to Tana JSON export file'
+    )
+    parser.add_argument(
+        '--depth', '-d',
+        type=int,
+        default=2,
+        help='Maximum depth to display (default: 2)'
+    )
+    parser.add_argument(
+        '--workspace-id', '-w',
+        type=str,
+        help='Workspace ID to filter nodes (optional)'
+    )
+    parser.add_argument(
+        '--stats', '-s',
+        action='store_true',
+        help='Show detailed statistics'
+    )
+    parser.add_argument(
+        '--list', '-l',
+        action='store_true',
+        help='Just list Home node and children names'
+    )
+    parser.add_argument(
+        '--count', '-n',
+        type=int,
+        default=1,
+        help='Number of layers to show with --list (default: 1)'
+    )
+    parser.add_argument(
+        '--start',
+        type=str,
+        help='Starting node ID instead of Home node'
+    )
+
+    args = parser.parse_args()
+
+    try:
+        # Initialize TanaIO
+        tana_io = TanaIO()
+
+        # Get JSON file
+        json_file = get_json_file(tana_io, args.json_file)
+        if not json_file:
+            return 1
+
+        Colors.success(f"Loading Tana export: {json_file.name}")
+
+        # Load JSON data
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        Colors.success(f"Loaded {len(data.get('docs', [])):,} nodes from export")
+
+        # Generate outline
+        generator = TanaOutlineGenerator(
+            data,
+            args.depth,
+            args.workspace_id,
+            args.start
+        )
+
+        if args.list:
+            generator.print_home_children_list(args.count)
+        else:
+            generator.print_outline()
+
+            if args.stats:
+                generator.print_statistics()
+
+        return 0
+
+    except KeyboardInterrupt:
+        Colors.warning("\nOperation cancelled by user")
+        return 1
+    except FileNotFoundError:
+        Colors.error(f"File not found: {args.json_file}")
+        return 1
+    except json.JSONDecodeError as e:
+        Colors.error(f"Invalid JSON format: {e}")
+        return 1
+    except Exception as e:
+        Colors.error(f"Error: {e}")
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

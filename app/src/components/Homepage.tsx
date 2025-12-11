@@ -138,20 +138,28 @@ export function Homepage() {
           </p>
 
           <div
-            className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-4 animate-slide-up"
+            className="flex flex-col items-center justify-center space-y-4 animate-slide-up"
             style={{ animationDelay: '0.2s' }}
           >
-            <a
-              href="/chat"
-              className="w-full sm:w-auto px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-gray-200 transition-all transform hover:scale-105 shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)]"
-            >
-              Get Started
-            </a>
+            <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-4 w-full">
+              <a
+                href="/chat"
+                className="w-full sm:w-auto px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-gray-200 transition-all transform hover:scale-105 shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)]"
+              >
+                Get Started
+              </a>
+              <a
+                href="/outline"
+                className="w-full sm:w-auto px-8 py-4 rounded-full border border-tana-border bg-tana-card/30 hover:bg-tana-card/50 text-white font-medium text-lg transition-all backdrop-blur-sm"
+              >
+                Outline Generator
+              </a>
+            </div>
             <a
               href={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/docs`}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full sm:w-auto px-8 py-4 rounded-full border border-tana-border bg-tana-card/30 hover:bg-tana-card/50 text-white font-medium text-lg transition-all backdrop-blur-sm"
+              className="w-full sm:w-auto px-8 py-3 rounded-full border border-tana-border/50 bg-tana-card/20 hover:bg-tana-card/30 text-white font-medium transition-all backdrop-blur-sm text-sm"
             >
               API Documentation
             </a>
@@ -231,6 +239,7 @@ export function Homepage() {
                 {[
                   'Batch import JSON exports',
                   'Generate Obsidian vaults',
+                  'Create hierarchical outlines',
                   'Analyze workspace structure',
                   'Scriptable via Python API',
                 ].map((item, i) => (

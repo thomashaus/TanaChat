@@ -17,11 +17,13 @@ from .user_manager import UserManager
 from .colors import Colors
 from .tana_importer import TanaImporter
 from .keytags_manager import KeyTagsManager
+from .tana_parser import TanaParser
 
 __all__ = [
     'TanaIO',
     'UserManager',
     'Colors',
     'TanaImporter',
-    'KeyTagsManager'
+    'KeyTagsManager',
+    'TanaParser'
 ]

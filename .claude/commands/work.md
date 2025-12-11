@@ -82,6 +82,9 @@ Before marking complete:
 - [ ] No hardcoded secrets
 - [ ] Documentation updated
 - [ ] Self-review completed
+- [ ] Import processes tested with sample data only
+- [ ] No real user data in test files
+- [ ] Gitleaks scan passed (`gitleaks detect --no-git`)
 
 ## Commands
 

@@ -3,6 +3,8 @@ KeyTags Manager - Core business logic for managing supertag metadata
 
 This module contains the core functionality for managing KeyTags,
 which control which supertags get their own directories during import.
+
+Now supports workspace-based KeyTags: {workspace_id}-keytags.json files.
 """
 
 import json
@@ -12,23 +14,86 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
 from .colors import Colors
+from .workspace_keytags_manager import WorkspaceKeyTagsManager
 
 
 class KeyTagsManager:
-    """Core KeyTags management functionality"""
+    """Core KeyTags management functionality with workspace support"""
 
-    def __init__(self, files_dir: Path = None):
-        """Initialize with custom files directory"""
+    def __init__(self, files_dir: Path = None, workspace_id: str = None):
+        """Initialize with custom files directory and optional workspace ID"""
         self.files_dir = files_dir or Path("./files")
         self.metadata_dir = self.files_dir / "metadata"
-        self.keytags_file = self.metadata_dir / "keytags.json"
+        self.keytags_file = self.metadata_dir / "keytags.json"  # Legacy support
+
+        # Initialize workspace manager
+        self.workspace_manager = WorkspaceKeyTagsManager(self.files_dir)
+        self.current_workspace_id = workspace_id
 
         # Ensure metadata directory exists
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
 
+        # Handle legacy migration
+        self._migrate_if_needed()
+
+    def _migrate_if_needed(self):
+        """Migrate from global keytags.json to workspace-based system if needed"""
+        if self.current_workspace_id is None and self.keytags_file.exists():
+            # Migrate to default workspace if no workspace specified
+            Colors.info("Migrating legacy keytags.json to workspace-based system...")
+            self.workspace_manager.migrate_from_global_keytags(self.keytags_file)
+            self.current_workspace_id = "default_workspace"
+
+    def set_workspace(self, workspace_id: str, json_file_path: Path = None):
+        """Set the current workspace and load its keytags"""
+        if json_file_path:
+            # Extract workspace ID from JSON if not provided
+            extracted_id = self.workspace_manager.get_workspace_id_from_json(json_file_path)
+            if extracted_id:
+                workspace_id = extracted_id
+
+        self.current_workspace_id = workspace_id
+
     def load_keytags(self) -> Dict[str, Any]:
-        """Load keytags.json file"""
-        if not self.keytags_file.exists():
+        """Load keytags file (legacy method - now uses workspace-based)"""
+        if self.current_workspace_id:
+            return self.workspace_manager.load_keytags(self.current_workspace_id)
+        else:
+            # Legacy behavior
+            if not self.keytags_file.exists():
+                Colors.error(f"KeyTags file not found: {self.keytags_file}")
+                Colors.info("Please run tana-importjson first to create the keytags.json file")
+                return {}
+
+            try:
+                with open(self.keytags_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                Colors.error(f"Invalid JSON in keytags file: {e}")
+                return {}
+            except Exception as e:
+                Colors.error(f"Error loading keytags file: {e}")
+                return {}
+
+    def save_keytags(self, keytags_data: Dict[str, Any], import_file: str = None) -> bool:
+        """Save keytags file with tracking metadata"""
+        if self.current_workspace_id:
+            # Use workspace-based system
+            return self.workspace_manager.save_keytags(self.current_workspace_id, keytags_data, import_file)
+        else:
+            # Legacy behavior
+            try:
+                # Add tracking metadata
+                keytags_data['updated_on'] = datetime.now().isoformat()
+                if import_file:
+                    keytags_data['updated_on'] = import_file
+
+                with open(self.keytags_file, 'w', encoding='utf-8') as f:
+                    json.dump(keytags_data, f, indent=2, ensure_ascii=False)
+                return True
+            except Exception as e:
+                Colors.error(f"Error saving keytags file: {e}")
+                return False
             Colors.error(f"KeyTags file not found: {self.keytags_file}")
             Colors.info("Please run tana-importjson first to create the keytags.json file")
             return {}

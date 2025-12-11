@@ -44,13 +44,21 @@ I am the TestCodeReviewAgent, responsible for reviewing code quality and ensurin
    - No secrets in code
    - Input validation
    - Auth checks present
+   - No hardcoded credentials
+   - Gitleaks scan passes
 
-4. **Documentation**
+4. **Data Safety**
+   - No real user data in test files
+   - Import processes use temp/ directory
+   - Sample data only contains fake content
+   - Environment variables used for credentials
+
+5. **Documentation**
    - README updated (if needed)
    - API docs current
    - Inline comments helpful
 
-5. **Performance**
+6. **Performance**
    - No obvious bottlenecks
    - Async used appropriately
    - Database queries efficient

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Tana Obsidian Vault Generator - Convert Tana JSON exports to Obsidian vault
-
-Usage: tana-obsidian [options]
+Enhanced Tana Obsidian Vault Generator - Convert Tana JSON exports to Obsidian vault
+Excludes system content and uses our proven import logic with diary consolidation.
 """
 
 import sys
@@ -11,6 +10,7 @@ import argparse
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Set
 import re
+from datetime import datetime
 
 # Add parent directory to path for shared libraries
 project_root = Path(__file__).resolve().parent.parent
@@ -19,8 +19,8 @@ sys.path.insert(0, str(project_root))
 from lib import TanaImporter, Colors
 
 
-class ObsidianVaultGenerator:
-    """Generate Obsidian vault from Tana JSON exports"""
+class EnhancedObsidianVaultGenerator:
+    """Generate Obsidian vault from Tana JSON exports using our proven import logic"""
 
     def __init__(self, files_dir: Path = None):
         """Initialize with custom files directory"""
@@ -28,50 +28,110 @@ class ObsidianVaultGenerator:
         self.tana_io = self.tana_importer.tana_io
         self.vault_dir = self.tana_io.export_dir / "obsidian"
         self.node_index: Dict[str, Dict[str, Any]] = {}
-        self.wiki_links: Dict[str, Set[str]] = {}
+        self.user_supertags: Dict[str, str] = {}  # name -> node_id
+
+        # Smart folder mapping for user content
+        self.supertag_folder_mapping = {
+            # Time-based content (consolidated into diary)
+            'day': 'diary',
+            'week': 'diary',
+            'month': 'diary',
+            'quarter': 'diary',
+            'year': 'diary',
+
+            # Project & work
+            'project': 'projects',
+            'goal': 'goals',
+            'task': 'tasks',
+
+            # Content & notes
+            'atomic note': 'notes',
+            'spark note': 'notes',
+            'note': 'notes',
+            'document': 'documents',
+
+            # People & planning
+            'contact': 'contacts',
+            'person': 'contacts',
+            'meeting': 'meetings',
+            'journal': 'journal',  # Personal journaling (distinct from time diary)
+
+            # Thinking & strategy
+            'vision': 'vision',
+            'topic': 'topics',
+            'idea': 'ideas',
+            'area': 'areas'
+        }
+
+    def is_user_content(self, node: Dict[str, Any]) -> bool:
+        """Filter to only export meaningful user content"""
+        node_id = node.get('id', '')
+        props = node.get('props', {})
+
+        # Exclude system nodes
+        if node_id.startswith('SYS_'):
+            return False
+
+        # Exclude system structures
+        if props.get('_docType') in ['tagDef', 'metanode']:
+            return False
+
+        # Exclude empty/placeholder content
+        name = props.get('name', '').strip()
+        if not name or name.lower() in ['no name', 'untitled', '']:
+            return False
+
+        return True
 
     def create_vault_structure(self):
-        """Create the basic Obsidian vault structure"""
+        """Create the enhanced Obsidian vault structure"""
         # Create main vault directory
         self.vault_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create .obsidian directory with plugins and configuration
+        # Create .obsidian directory with enhanced configuration
         obsidian_config_dir = self.vault_dir / ".obsidian"
         obsidian_config_dir.mkdir(exist_ok=True)
 
-        # Create basic Obsidian configuration
+        # Create enhanced Obsidian configuration
         self.create_obsidian_config()
 
-        # Create subdirectories for node organization
-        (self.vault_dir / "system").mkdir(exist_ok=True)
-        (self.vault_dir / "Projects").mkdir(exist_ok=True)
-        (self.vault_dir / "Goals").mkdir(exist_ok=True)
-        (self.vault_dir / "Tasks").mkdir(exist_ok=True)
-        (self.vault_dir / "Context").mkdir(exist_ok=True)
-        (self.vault_dir / "Library").mkdir(exist_ok=True)
-        (self.vault_dir / "Attachments").mkdir(exist_ok=True)
+        # Create smart directory structure
+        dirs_to_create = [
+            'diary', 'projects', 'goals', 'tasks', 'notes', 'documents',
+            'contacts', 'meetings', 'journal', 'vision', 'topics', 'areas', 'library'
+        ]
 
-        Colors.success(f"Created Obsidian vault structure at: {self.vault_dir}")
+        for dir_name in dirs_to_create:
+            (self.vault_dir / dir_name).mkdir(exist_ok=True)
+
+        Colors.success(f"Created enhanced Obsidian vault structure at: {self.vault_dir}")
 
     def create_obsidian_config(self):
-        """Create basic Obsidian configuration files"""
-        # Basic app.json
+        """Create enhanced Obsidian configuration files"""
+        # Enhanced app.json optimized for Tana content
         app_config = {
             "legacyEditor": False,
             "promptDelete": False,
             "newFileLocation": "folder",
-            "newFileFolderPath": "Nodes",
+            "newFileFolderPath": "Inbox",
             "attachmentFolderPath": "Attachments",
             "alwaysUpdateLinks": True,
             "useMarkdownLinks": True,
-            "newLinkFormat": "shortest"
+            "newLinkFormat": "shortest",
+            "strictLineBreaks": True,
+            "foldHeading": True,
+            "foldIndent": True,
+            "showLineNumber": True,
+            "rightToLeft": False,
+            "autoConvertHtml": True,
+            "livePreview": True
         }
 
         config_file = self.vault_dir / ".obsidian" / "app.json"
         with open(config_file, 'w') as f:
             json.dump(app_config, f, indent=2)
 
-        # Community plugins list
+        # Enhanced community plugins for Tana workflow
         plugins_dir = self.vault_dir / ".obsidian" / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
@@ -79,7 +139,10 @@ class ObsidianVaultGenerator:
             "plugins": [
                 "dataview",
                 "calendar",
-                "cm-editor-syntax-highlight-obsidian"
+                "cm-editor-syntax-highlight-obsidian",
+                "obsidian-tasks-plugin",
+                "tag-wrangler",
+                "quick-switcher-plus"
             ]
         }
 
@@ -87,421 +150,485 @@ class ObsidianVaultGenerator:
         with open(plugins_file, 'w') as f:
             json.dump(community_plugins, f, indent=2)
 
-    def build_node_index(self, data: Dict[str, Any]):
-        """Build an index of all nodes for cross-referencing"""
-        Colors.info("🔍 Building node index...")
-
-        def process_nodes(items, parent_path=None):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-
-                node_id = item.get('id', item.get('uid', ''))
-                if node_id:
-                    # Get name from props for Tagr format
-                    props = item.get('props', {})
-                    name = props.get('name', item.get('name', 'Untitled'))
-
-                    # Store node information
-                    self.node_index[node_id] = {
-                        'name': name,
-                        'id': node_id,
-                        'description': props.get('description', item.get('description', '')),
-                        'created': props.get('created', item.get('created')),
-                        'children': item.get('children', []),
-                        'parent_path': parent_path,
-                        'raw_data': item,
-                        'props': props,
-                        'is_system': node_id.startswith('SYS_'),
-                        'is_tag_def': props.get('_docType') == 'tagDef'
-                    }
-
-                # Process children recursively
-                children = item.get('children', [])
-                if children:
-                    current_path = f"{parent_path} > {item.get('props', {}).get('name', item.get('name', ''))}" if parent_path else item.get('props', {}).get('name', item.get('name', ''))
-                    process_nodes(children, current_path)
-
-        # Handle different Tana JSON formats
-        docs = data.get('nodes', data.get('docs', []))
-        process_nodes(docs)
-
-        Colors.success(f"Indexed {len(self.node_index)} nodes")
-
-    def sanitize_filename(self, name: str) -> str:
-        """Sanitize a node name for use as a filename"""
-        # Remove or replace invalid characters
-        sanitized = re.sub(r'[<>:"/\\|?*]', '-', name)
-        sanitized = re.sub(r'\n', ' ', sanitized)
-        sanitized = re.sub(r'[^\w\s\-().]', '', sanitized)  # Keep only word chars, spaces, hyphens, dots, parentheses
-        sanitized = sanitized.strip()
-
-        # Replace multiple spaces with single space
-        sanitized = re.sub(r'\s+', ' ', sanitized)
-
-        # Ensure it's not empty and not too long
-        if not sanitized:
-            sanitized = "Untitled"
-        elif len(sanitized) > 100:
-            sanitized = sanitized[:97] + "..."
-
-        return sanitized
-
-    def generate_wiki_link(self, node_name: str, node_id: str) -> str:
-        """Generate a Obsidian wiki link"""
-        sanitized_name = self.sanitize_filename(node_name)
-        return f"[[{sanitized_name}]]"
-
-    def process_content_for_links(self, content: str) -> str:
-        """Process content to convert Tana references to Obsidian links"""
-        if not content:
-            return content
-
-        # Look for potential node references in the content
-        # This is a basic implementation - you could enhance it with more sophisticated patterns
-
-        # Replace common Tana patterns with Obsidian links
-        content = re.sub(r'#(\w+)', r'#\1', content)  # Preserve hashtags
-
-        # Look for node IDs and convert them to wiki links
-        for node_id, node_info in self.node_index.items():
-            if node_id in content:
-                wiki_link = self.generate_wiki_link(node_info['name'], node_id)
-                content = content.replace(node_id, wiki_link)
-
-        return content
-
-    def determine_node_folder(self, node_id: str, node_info: Dict[str, Any]) -> Path:
-        """Determine which folder a node should go in based on supertag"""
-        # Skip system nodes and tag definitions
-        if node_id.startswith('SYS_') or node_info.get('is_tag_def', False):
-            return self.vault_dir / "system"  # We'll still create system nodes but they won't be processed
-
-        # Get supertag to determine folder
-        supertag = self.get_node_supertag(node_id, node_info)
-
-        # Map supertags to folders
-        folder_mapping = {
-            'project': self.vault_dir / 'Projects',
-            'goal': self.vault_dir / 'Goals',
-            'goals': self.vault_dir / 'Goals',
-            'task': self.vault_dir / 'Tasks',
-            'tasks': self.vault_dir / 'Tasks',
-            'context': self.vault_dir / 'Context',
-            'atomic note': self.vault_dir / 'Library',
-            'spark note': self.vault_dir / 'Library',
-            'note': self.vault_dir / 'Library',
-            'role': self.vault_dir / 'Library',
-            'vision': self.vault_dir / 'Library',
-            'document': self.vault_dir / 'Library',
-            'collection': self.vault_dir / 'Library'
+        # Dataview configuration for time-based content
+        dataview_config = {
+            "dataview": {
+                "query": {
+                    "inlineQueryPrefix": "$",
+                    "inlineJsQueryPrefix": "$$"
+                },
+                "table": {
+                    "pageSize": 20
+                }
+            }
         }
 
-        return folder_mapping.get(supertag, self.vault_dir / 'Library')
+        data_view_file = plugins_dir / "dataview.json"
+        with open(data_view_file, 'w') as f:
+            json.dump(dataview_config, f, indent=2)
 
-    def create_node_file(self, node_id: str, node_info: Dict[str, Any]):
-        """Create an Obsidian markdown file for a node"""
-        node_name = node_info['name']
+    def discover_all_supertags(self, data: Dict[str, Any]) -> Dict[str, str]:
+        """Discover all user-defined supertags (not just keytags)"""
+        Colors.info("🔍 Discovering all user supertags...")
 
-        # Skip system nodes and tag definitions - they don't represent user content
-        if node_info.get('is_system', False) or node_info.get('is_tag_def', False):
-            return
+        docs = data.get('docs', data.get('nodes', []))
+        user_supertags = {}
 
-        # Only create files for content nodes with meaningful names
-        if node_name in ['No name', 'Untitled', '']:
-            return
+        # Find all supertag definitions
+        for doc in docs:
+            props = doc.get('props', {})
+            if props.get('_docType') == 'tagDef':
+                name = props.get('name', '').lower()
+                supertag_id = doc.get('id', '')
 
-        # Determine which folder to put the node in
-        target_folder = self.determine_node_folder(node_id, node_info)
+                # Exclude system supertags
+                if name and supertag_id and not supertag_id.startswith('SYS_'):
+                    user_supertags[name] = supertag_id
 
-        # Create the Tana-style markdown content (like the zip example)
+        Colors.success(f"Found {len(user_supertags)} user supertags")
+        return user_supertags
+
+    def build_metanode_mappings(self, data: Dict[str, Any]) -> Dict[str, str]:
+        """Build metanode to supertag mappings using our proven algorithm"""
+        docs = data.get('docs', data.get('nodes', []))
+        doc_lookup = {doc.get('id'): doc for doc in docs}
+
+        # Build target supertag ID set
+        target_supertag_ids = set(self.user_supertags.values())
+
+        meta_node_to_supertag = {}
+
+        Colors.info("🏗️ Building metanode mappings...")
+
+        # Trace metanode hierarchy efficiently
+        for doc in docs:
+            if not doc.get('children'):
+                continue
+
+            doc_id = doc.get('id')
+            children = doc.get('children', [])
+
+            # Check if this document has a structure we care about
+            for child_id in children:
+                child_doc = doc_lookup.get(child_id)
+                if not child_doc or not child_doc.get('children'):
+                    continue
+
+                child_children = child_doc.get('children', [])
+                for grandchild_id in child_children:
+                    if grandchild_id in target_supertag_ids:
+                        # Found mapping!
+                        for supertag_name, supertag_id in self.user_supertags.items():
+                            if grandchild_id == supertag_id:
+                                meta_node_to_supertag[doc_id] = supertag_name
+                                break
+
+        Colors.success(f"Built {len(meta_node_to_supertag)} metanode mappings")
+        return meta_node_to_supertag
+
+    def extract_user_nodes(self, data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        """Extract user nodes organized by supertag"""
+        Colors.info("📊 Extracting user nodes...")
+
+        docs = data.get('docs', data.get('nodes', []))
+        doc_lookup = {doc.get('id'): doc for doc in docs}
+        meta_node_to_supertag = self.build_metanode_mappings(data)
+
+        nodes_by_supertag = {}
+
+        # Initialize empty lists for all known supertags
+        for supertag_name in self.user_supertags.keys():
+            nodes_by_supertag[supertag_name] = []
+
+        # Process nodes and assign to supertags
+        for doc in docs:
+            if not self.is_user_content(doc):
+                continue
+
+            props = doc.get('props', {})
+            meta_node_id = props.get('_metaNodeId')
+
+            # Check if this node has any user supertag
+            if meta_node_id and meta_node_id in meta_node_to_supertag:
+                supertag_name = meta_node_to_supertag[meta_node_id]
+
+                node_info = {
+                    'name': props.get('name', 'Untitled'),
+                    'node_id': doc.get('id', 'unknown'),
+                    'description': props.get('description', ''),
+                    'created': props.get('created'),
+                    'children': doc.get('children', []),
+                    'props': props
+                }
+
+                nodes_by_supertag[supertag_name].append(node_info)
+
+        # Count total nodes processed
+        total_nodes = sum(len(nodes) for nodes in nodes_by_supertag.values())
+        Colors.success(f"Extracted {total_nodes} user nodes across {len(self.user_supertags)} supertags")
+
+        return nodes_by_supertag
+
+    def get_folder_for_supertag(self, supertag_name: str) -> str:
+        """Get the target folder for a supertag"""
+        return self.supertag_folder_mapping.get(supertag_name, 'library')
+
+    def format_time_based_filename(self, node_info: Dict[str, Any], supertag_name: str) -> str:
+        """Create proper filename for time-based content"""
+        node_name = node_info.get('name', '')
+        created = node_info.get('created')
+
+        if not created:
+            return f"{node_name}.md"
+
+        # Parse creation date
+        if isinstance(created, str):
+            try:
+                date_obj = datetime.fromisoformat(created.replace('Z', '+00:00'))
+            except:
+                date_obj = datetime.fromtimestamp(int(created)/1000) if created.isdigit() else datetime.now()
+        else:
+            date_obj = datetime.fromtimestamp(created/1000)
+
+        # Format based on supertag type
+        if supertag_name == 'day':
+            return date_obj.strftime("%Y-%m-%d.md")
+        elif supertag_name == 'week':
+            week_num = date_obj.isocalendar()[1]
+            return f"{date_obj.year}-W{week_num:02d}.md"
+        elif supertag_name == 'month':
+            return f"{date_obj.year}-{date_obj.strftime('%B')}.md"
+        elif supertag_name == 'year':
+            return f"{date_obj.year}.md"
+        else:
+            return self.sanitize_filename(f"{node_name}.md")
+
+    def sanitize_filename(self, filename: str) -> str:
+        """Sanitize a node name for use as a filename"""
+        # Remove invalid filesystem characters
+        sanitized = re.sub(r'[<>:"/\\|?*]', '-', filename)
+        sanitized = re.sub(r'[^\w\s\-().]', '', sanitized)
+        sanitized = re.sub(r'\s+', '-', sanitized).strip('-')
+
+        # Limit length
+        max_length = 80
+        if len(sanitized) > max_length and sanitized.endswith('.md'):
+            sanitized = sanitized[:max_length-3] + '.md'
+        elif len(sanitized) > max_length:
+            sanitized = sanitized[:max_length-3] + '...'
+
+        return sanitized or 'untitled.md'
+
+    def create_obsidian_node_file(self, node_info: Dict[str, Any], supertag_name: str, folder_path: Path, doc_lookup: Dict[str, Any]) -> str:
+        """Create an Obsidian markdown file for a node with YAML frontmatter"""
+        node_name = node_info.get('name', 'Untitled')
+        node_id = node_info.get('node_id', 'unknown')
+
+        # Determine filename
+        if supertag_name in ['day', 'week', 'month', 'year']:
+            filename = self.format_time_based_filename(node_info, supertag_name)
+        else:
+            filename = f"{node_id}.md"  # Use node ID for consistency
+
+        file_path = folder_path / filename
+
+        # Generate YAML frontmatter
+        frontmatter = []
+        frontmatter.append("---")
+        frontmatter.append(f"created: {self.format_created_date(node_info.get('created'))}")
+        frontmatter.append(f"node_id: {node_id}")
+        frontmatter.append(f"supertags:")
+        frontmatter.append(f"  - {supertag_name}")
+
+        # Add additional tags from folder
+        folder_name = self.get_folder_for_supertag(supertag_name)
+        if folder_name != 'library':
+            frontmatter.append(f"tags:")
+            frontmatter.append(f"  - {supertag_name}")
+            frontmatter.append(f"  - {folder_name}")
+
+        frontmatter.append("---")
+
+        # Generate content
         content_lines = []
 
-        # First line: name with supertag
-        supertag = self.get_node_supertag(node_id, node_info)
-        if supertag:
-            content_lines.append(f"{node_name} #{supertag}")
-        else:
-            content_lines.append(f"{node_name}")
+        # Add frontmatter
+        content_lines.extend(frontmatter)
+        content_lines.append("")
 
-        # Add children as markdown links (Tana format)
+        # Title
+        content_lines.append(f"# {node_name}")
+        content_lines.append("")
+
+        # Supertags section
+        content_lines.append("## 🏷️ Supertags")
+        content_lines.append(f"- **{supertag_name.title()}**")
+        content_lines.append("")
+
+        # Children section using our proven logic
         children = node_info.get('children', [])
-        for child_id in children:
-            if child_id in self.node_index:
-                child_info = self.node_index[child_id]
-                # Skip system and tag definition children
-                if not child_info.get('is_system', False) and not child_info.get('is_tag_def', False):
-                    child_name = child_info['name']
-                    child_supertag = self.get_node_supertag(child_id, child_info)
-                    # Create link in Tana format: [Node Name](<relative/path.md>)
-                    relative_path = self.get_relative_path(node_id, child_id, child_supertag)
-                    content_lines.append(f"- [{child_name}](<{relative_path}>)")
+        if children:
+            content_lines.append("## 📋 Children")
+            content_lines.append("")
 
-        # Determine filename with supertag (like the zip example)
-        if supertag:
-            filename = f"{node_name}({supertag}).md"
-        else:
-            filename = f"{node_name}.md"
+            for child_id in children:
+                child_content = self.get_child_content(child_id, node_id, doc_lookup)
+                if child_content:
+                    content_lines.append(child_content)
+            content_lines.append("")
 
-        # Sanitize filename to avoid invalid characters
-        filename = self.sanitize_filename(filename)
+        # Node metadata
+        content_lines.append("## 📝 Node Details")
+        content_lines.append(f"**Node ID:** `{node_id}`")
 
-        # Ensure target folder exists
-        target_folder.mkdir(parents=True, exist_ok=True)
-        file_path = target_folder / filename
-
-        # Handle filename conflicts
-        counter = 1
-        while file_path.exists():
-            if supertag:
-                filename = f"{self.sanitize_filename(node_name)}({supertag})-{counter}.md"
+        created = node_info.get('created')
+        if created:
+            if isinstance(created, str):
+                content_lines.append(f"**Created:** {created}")
             else:
-                filename = f"{self.sanitize_filename(node_name)}-{counter}.md"
-            file_path = target_folder / filename
-            counter += 1
+                created_date = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M:%S')
+                content_lines.append(f"**Created:** {created_date}")
 
+        description = node_info.get('description', '')
+        if description and description.strip():
+            content_lines.append(f"**Description:** {description}")
+
+        content_lines.append("")
+        content_lines.append("---")
+        content_lines.append(f"*Created from Tana export - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+
+        # Write file
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(content_lines))
 
-    def get_node_supertag(self, node_id: str, node_info: Dict[str, Any]) -> str:
-        """Get the primary supertag for a node"""
-        # For Tagr format, we need to check if this node is referenced by any supertag definitions
-        supertag_mapping = {
-            'project': 'project',
-            'goal': 'goals',
-            'task': 'task',
-            'context': 'context',
-            'atomic note': 'atomic note',
-            'spark note': 'spark note',
-            'note': 'note',
-            'role': 'role',
-            'vision': 'vision',
-            'document': 'document',
-            'collection': 'collection'
-        }
+        return filename
 
-        # Look at node structure to determine its type
-        props = node_info.get('props', {})
-        raw_data = node_info.get('raw_data', {})
+    def get_child_content(self, child_id: str, parent_node_id: str, doc_lookup: Dict[str, Any] = None) -> str:
+        """Get child content preserving formatting, returning markdown (reused from our working logic)"""
+        if not doc_lookup:
+            return f"- [[{child_id}.md]]"
 
-        # Check if this is a library node (all non-system nodes without clear supertags go to library)
-        node_name = node_info.get('name', '')
-        if node_name.lower() in ['todo', 'todo 2', 'great idea', 'always use tana for writing']:
-            if 'todo' in node_name.lower():
-                return 'task'
-            elif 'great idea' in node_name.lower():
-                return 'spark note'
-            elif 'always use tana for writing' in node_name.lower():
-                return 'atomic note'
+        child_doc = doc_lookup.get(child_id)
+        if not child_doc:
+            return f"- [[{child_id}.md]]"
 
-        # Default to library for now
-        return 'note'
+        props = child_doc.get('props', {})
 
-    def get_relative_path(self, from_node_id: str, to_node_id: str, to_supertag: str) -> str:
-        """Get relative path between two nodes"""
-        # Map supertags to folder names
-        folder_mapping = {
-            'project': 'Projects',
-            'goal': 'Goals',
-            'goals': 'Goals',
-            'task': 'Tasks',
-            'tasks': 'Tasks',
-            'context': 'Context',
-            'atomic note': 'Library',
-            'spark note': 'Library',
-            'note': 'Library',
-            'role': 'Library',
-            'vision': 'Library',
-            'document': 'Library',
-            'collection': 'Library'
-        }
+        # If this is a regular node with a name, create a link
+        child_name = props.get('name')
+        if child_name and child_name.strip():
+            return f"- [[{child_id}.md|{child_name}]]"
 
-        target_folder = folder_mapping.get(to_supertag, 'Library')
-        to_node_info = self.node_index.get(to_node_id, {})
-        to_name = to_node_info.get('name', 'node')
+        # If this is content-only, use the content as-is
+        content_fields = ['description', 'content', 'text']
+        for field in content_fields:
+            if field in props and props[field]:
+                content = props[field]
+                if isinstance(content, str) and content.strip():
+                    return f"- {content}"
 
-        if to_supertag:
-            return f"{to_name}({to_supertag}).md"
+        # Look for fields that could contain rich text
+        for key, value in props.items():
+            if key not in ['created', '_ownerId', '_flags', '_metaNodeId', '_docType', '_sourceId']:
+                if isinstance(value, str) and value.strip() and len(value) > 20:
+                    return f"- {value}"
+
+        return f"- [[{child_id}.md|Child Node]]"
+
+    def format_created_date(self, created) -> str:
+        """Format created date for YAML frontmatter"""
+        if not created:
+            return ""
+
+        if isinstance(created, str):
+            try:
+                date_obj = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                return date_obj.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                try:
+                    date_obj = datetime.fromtimestamp(int(created)/1000)
+                    return date_obj.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    return created
         else:
-            return f"{to_name}.md"
+            date_obj = datetime.fromtimestamp(created/1000)
+            return date_obj.strftime('%Y-%m-%d %H:%M:%S')
 
-    def build_wiki_links(self):
-        """Build bidirectional wiki links between nodes"""
-        Colors.info("🔗 Building wiki links...")
+    def create_index_files(self, nodes_by_supertag: Dict[str, List[Dict[str, Any]]], import_file: Path):
+        """Create comprehensive index files for navigation"""
+        Colors.info("📝 Creating index files...")
 
-        for node_id, node_info in self.node_index.items():
-            children = node_info.get('children', [])
-            for child_id in children:
-                if child_id in self.node_index:
-                    # Child links to parent
-                    if child_id not in self.wiki_links:
-                        self.wiki_links[child_id] = set()
-                    self.wiki_links[child_id].add(node_id)
-
-        Colors.success(f"Built {len(self.wiki_links)} wiki relationships")
-
-    def create_index_file(self, import_file: Path):
-        """Create an index file for the vault"""
-        index_content = [
-            "# Tana Import Index",
+        # Create main home page
+        home_content = [
+            "# 🏠 Tana Vault",
             "",
-            f"*Imported from {import_file.name} -- {self.format_timestamp(import_file.stat().st_mtime)}*",
+            f"*Imported from {import_file.name} on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*",
             "",
-            "## Summary",
+            "## 📊 Overview",
             "",
-            f"- **Total Nodes:** {len(self.node_index)}",
-            f"- **Node Files:** {len(list((self.vault_dir / 'Nodes').glob('*.md')))}",
-            f"- **Wiki Links:** {sum(len(links) for links in self.wiki_links.values())}",
+            f"- **Total Nodes:** {sum(len(nodes) for nodes in nodes_by_supertag.values())}",
+            f"- **Supertags Found:** {len([s for s in nodes_by_supertag.values() if s])}",
             "",
-            "## All Nodes",
-            "",
-            "| Node Name | Tana ID | File |",
-            "|-----------|---------|------|"
+            "## 📁 Content Areas",
+            ""
         ]
 
-        # List all nodes
-        for node_id, node_info in sorted(self.node_index.items(), key=lambda x: x[1]['name'].lower()):
-            node_name = node_info['name']
-            sanitized_name = self.sanitize_filename(node_name)
-            wiki_link = self.generate_wiki_link(node_name, node_id)
-            index_content.append(f"| {wiki_link} | `{node_id}` | {sanitized_name}.md |")
+        # Group by folder for cleaner organization
+        folder_content = {}
 
-        index_content.extend([
+        for supertag_name, nodes in nodes_by_supertag.items():
+            if not nodes:
+                continue
+
+            folder = self.get_folder_for_supertag(supertag_name)
+            if folder not in folder_content:
+                folder_content[folder] = []
+
+            # Sort nodes by creation date or name
+            sorted_nodes = sorted(nodes, key=lambda x: (
+                x.get('created', 0) if isinstance(x.get('created'), (int, float)) else 0,
+                x.get('name', '').lower()
+            ), reverse=True)
+
+            folder_content[folder].append({
+                'supertag': supertag_name,
+                'count': len(nodes),
+                'nodes': sorted_nodes[:5]  # Show first 5 as examples
+            })
+
+        # Add folder sections to home page
+        for folder, supertag_info in sorted(folder_content.items()):
+            if folder == 'diary':
+                home_content.extend([
+                    f"### 📅 {folder.title()}",
+                    "All your time-based content organized chronologically:",
+                    ""
+                ])
+            elif folder == 'projects':
+                home_content.extend([
+                    f"### 🚀 {folder.title()}",
+                    "Your active projects and initiatives:",
+                    ""
+                ])
+            else:
+                home_content.extend([
+                    f"### 📚 {folder.title()}",
+                    ""
+                ])
+
+            for info in supertag_info:
+                home_content.append(f"**{info['supertag'].title()}** ({info['count']} items)")
+
+                # Add recent examples
+                for node in info['nodes']:
+                    node_name = node.get('name', 'Untitled')
+                    created = node.get('created')
+
+                    # Determine filename
+                    if info['supertag'] in ['day', 'week', 'month', 'year']:
+                        filename = self.format_time_based_filename(node, info['supertag'])
+                    else:
+                        filename = f"{node.get('node_id')}.md"
+
+                    if created:
+                        if isinstance(created, (int, float)):
+                            date_str = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d')
+                            home_content.append(f"  - [[{filename}|{node_name}]] ({date_str})")
+                        else:
+                            home_content.append(f"  - [[{filename}|{node_name}]]")
+                    else:
+                        home_content.append(f"  - [[{filename}|{node_name}]]")
+                home_content.append("")
+
+            home_content.append("")
+
+        # Add navigation links
+        home_content.extend([
+            "## 🔗 Quick Navigation",
             "",
-            "## Tags",
+            "- **📅 Diary** - Browse chronologically through days, weeks, months, years",
+            "- **🚀 Projects** - Track your active projects and initiatives",
+            "- **✅ Tasks** - Manage your action items and todos",
+            "- **📝 Notes** - Access all your notes and thoughts",
+            "- **👥 Contacts** - Your people and network",
+            "- **🎯 Goals** - Track objectives and aspirations",
+            "- **🔮 Vision** - Your long-term plans and strategy",
+            "",
+            "---",
+            "*Vault generated with enhanced TanaChat Obsidian exporter*"
+        ])
+
+        # Write home file
+        home_file = self.vault_dir / "🏠 Home.md"
+        with open(home_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(home_content))
+
+        # Create diary-specific index
+        if 'day' in nodes_by_supertag or 'week' in nodes_by_supertag or 'month' in nodes_by_supertag or 'year' in nodes_by_supertag:
+            self.create_diary_index(nodes_by_supertag)
+
+    def create_diary_index(self, nodes_by_supertag: Dict[str, List[Dict[str, Any]]]):
+        """Create a special index for diary content"""
+        diary_content = [
+            "# 📅 Diary & Time-Based Content",
+            "",
+            "Your chronological journey through days, weeks, months, and years.",
+            "",
+            "## 🗓️ Recent Time Entries",
+            ""
+        ]
+
+        # Collect and sort all time-based content
+        all_time_nodes = []
+
+        for time_supertag in ['day', 'week', 'month', 'year']:
+            if time_supertag in nodes_by_supertag:
+                for node in nodes_by_supertag[time_supertag]:
+                    node['supertag'] = time_supertag
+                    all_time_nodes.append(node)
+
+        # Sort by creation date
+        all_time_nodes.sort(key=lambda x: x.get('created', 0), reverse=True)
+
+        # Add recent entries
+        for node in all_time_nodes[:20]:
+            node_name = node.get('name', 'Untitled')
+            supertag = node['supertag']
+            created = node.get('created')
+
+            filename = self.format_time_based_filename(node, supertag)
+
+            if isinstance(created, (int, float)):
+                date_str = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d')
+                diary_content.append(f"- [[{filename}|{node_name}]] ({date_str})")
+            else:
+                diary_content.append(f"- [[{filename}|{node_name}]]")
+
+        diary_content.extend([
+            "",
+            "## 📈 Browse by Time Period",
+            "",
+            "### 📅 Daily Entries",
+            f"- [[📅 All Days|View all {len(nodes_by_supertag.get('day', []))} daily entries]]",
+            "",
+            "### 📆 Weekly Reviews",
+            f"- [[📆 All Weeks|View all {len(nodes_by_supertag.get('week', []))} weekly reviews]]",
+            "",
+            "### 🗓️ Monthly Plans",
+            f"- [[🗓️ All Months|View all {len(nodes_by_supertag.get('month', []))} monthly plans]]",
+            "",
+            "### 🌟 Annual Goals",
+            f"- [[🌟 All Years|View all {len(nodes_by_supertag.get('year', []))} annual goals]]",
             ""
         ])
 
-        # Collect all tags
-        all_tags = set()
-        for node_info in self.node_index.values():
-            raw_data = node_info.get('raw_data', {})
-            if 'supertags' in raw_data:
-                for supertag in raw_data['supertags']:
-                    if isinstance(supertag, dict) and 'name' in supertag:
-                        all_tags.add(supertag['name'])
-
-        for tag in sorted(all_tags):
-            index_content.append(f"## {tag}")
-            index_content.append("")
-
-            # Find nodes with this tag
-            tagged_nodes = []
-            for node_id, node_info in self.node_index.items():
-                raw_data = node_info.get('raw_data', {})
-                if 'supertags' in raw_data:
-                    for supertag in raw_data['supertags']:
-                        if isinstance(supertag, dict) and 'name' in supertag and supertag['name'] == tag:
-                            wiki_link = self.generate_wiki_link(node_info['name'], node_id)
-                            tagged_nodes.append(f"- {wiki_link}")
-                            break
-
-            index_content.extend(tagged_nodes)
-            index_content.append("")
-
-        # Write index file
-        index_file = self.vault_dir / "🏠 Home.md"
-        with open(index_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(index_content))
-
-    def format_timestamp(self, timestamp: float) -> str:
-        """Format a timestamp for display"""
-        from datetime import datetime
-        return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-
-    def run_tests(self) -> Dict[str, Any]:
-        """Run tests on the generated vault"""
-        Colors.info("🧪 Running tests on generated vault...")
-
-        test_results = {
-            'system_nodes_in_correct_folder': True,
-            'supertag_nodes_in_correct_folder': True,
-            'content_nodes_created': True,
-            'wiki_links_functional': True,
-            'yaml_frontmatter_valid': True
-        }
-
-        # Test 1: System nodes in system folder
-        system_folder = self.vault_dir / "system"
-        system_files = list(system_folder.glob("*.md"))
-        sys_nodes_in_system = sum(1 for node_id in self.node_index.keys()
-                                  if node_id.startswith('SYS_'))
-
-        if len(system_files) < sys_nodes_in_system * 0.9:  # Allow some tolerance
-            test_results['system_nodes_in_correct_folder'] = False
-            Colors.warning(f"⚠️  System nodes: Expected ~{sys_nodes_in_system}, found {len(system_files)}")
-        else:
-            Colors.success(f"✅ System nodes: {len(system_files)} files in correct folder")
-
-        # Test 2: Content nodes in correct folders
-        projects_folder = self.vault_dir / "Projects"
-        goals_folder = self.vault_dir / "Goals"
-        tasks_folder = self.vault_dir / "Tasks"
-        context_folder = self.vault_dir / "Context"
-        library_folder = self.vault_dir / "Library"
-
-        projects_files = list(projects_folder.glob("*.md"))
-        goals_files = list(goals_folder.glob("*.md"))
-        tasks_files = list(tasks_folder.glob("*.md"))
-        context_files = list(context_folder.glob("*.md"))
-        library_files = list(library_folder.glob("*.md"))
-
-        content_files_count = len(projects_files) + len(goals_files) + len(tasks_files) + len(context_files) + len(library_files)
-
-        # Count expected content nodes (non-system, non-tagdef)
-        content_count = sum(1 for node_info in self.node_index.values()
-                           if not node_info.get('is_system', False) and not node_info.get('is_tag_def', False)
-                           and node_info.get('name') not in ['No name', 'Untitled', ''])
-
-        # Test 2: Content nodes created in correct folders
-        if content_files_count < content_count * 0.5:  # Be more lenient since many nodes might be empty
-            test_results['content_nodes_created'] = False
-            Colors.warning(f"⚠️  Content nodes: Expected ~{content_count}, found {content_files_count}")
-        else:
-            Colors.success(f"✅ Content nodes: {content_files_count} files in correct folders")
-            Colors.success(f"  - Projects: {len(projects_files)}")
-            Colors.success(f"  - Goals: {len(goals_files)}")
-            Colors.success(f"  - Tasks: {len(tasks_files)}")
-            Colors.success(f"  - Context: {len(context_files)}")
-            Colors.success(f"  - Library: {len(library_files)}")
-
-        # Test 4: Check markdown content format
-        files_checked = 0
-        total_checked = min(20, len(projects_files) + len(goals_files) + len(tasks_files) + len(context_files) + len(library_files))
-
-        all_content_files = projects_files + goals_files + tasks_files + context_files + library_files
-        for file_path in all_content_files[:total_checked]:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # Check if it has proper Tana markdown format (first line with content)
-                    lines = content.strip().split('\n')
-                    if lines and lines[0].strip() and not lines[0].startswith('#'):
-                        # Valid Tana format starts with content, not a markdown header
-                        files_checked += 1
-            except Exception:
-                pass  # Skip invalid files
-
-        if files_checked < total_checked * 0.3:  # Be more lenient
-            test_results['yaml_frontmatter_valid'] = False
-            Colors.warning(f"⚠️  Content format: {files_checked}/{total_checked} files in Tana format")
-        else:
-            Colors.success(f"✅ Content format: {files_checked}/{total_checked} files in Tana format")
-
-        # Summary
-        passed_tests = sum(1 for result in test_results.values() if result)
-        total_tests = len(test_results)
-
-        if passed_tests == total_tests:
-            Colors.success(f"✅ All {total_tests} tests passed!")
-        else:
-            Colors.warning(f"⚠️  {passed_tests}/{total_tests} tests passed")
-
-        return test_results
+        diary_file = self.vault_dir / "diary" / "📅 Diary Index.md"
+        with open(diary_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(diary_content))
 
     def generate_vault(self, import_file: Path) -> Dict[str, Any]:
-        """Generate the complete Obsidian vault"""
-        Colors.info(f"🚀 Generating Obsidian vault from {import_file.name}")
+        """Generate the complete Obsidian vault using our proven logic"""
+        Colors.info(f"🚀 Generating enhanced Obsidian vault from {import_file.name}")
 
         try:
             # Load and parse the Tana JSON
@@ -511,47 +638,50 @@ class ObsidianVaultGenerator:
             # Create vault structure
             self.create_vault_structure()
 
-            # Build node index
-            self.build_node_index(data)
+            # Discover all user supertags
+            self.user_supertags = self.discover_all_supertags(data)
 
-            # Build wiki links
-            self.build_wiki_links()
+            # Extract user nodes by supertag
+            nodes_by_supertag = self.extract_user_nodes(data)
+
+            # Create doc lookup for content processing
+            docs = data.get('docs', data.get('nodes', []))
+            doc_lookup = {doc.get('id'): doc for doc in docs}
 
             # Create individual node files
             Colors.info("📝 Creating node files...")
-            for node_id, node_info in self.node_index.items():
-                self.create_node_file(node_id, node_info)
+            files_created = 0
+            folder_stats = {}
 
-            # Create index file
-            self.create_index_file(import_file)
+            for supertag_name, nodes in nodes_by_supertag.items():
+                if not nodes:
+                    continue
 
-            # Count files by folder
-            system_files = len(list((self.vault_dir / "system").glob("*.md")))
-            projects_files = len(list((self.vault_dir / "Projects").glob("*.md")))
-            goals_files = len(list((self.vault_dir / "Goals").glob("*.md")))
-            tasks_files = len(list((self.vault_dir / "Tasks").glob("*.md")))
-            context_files = len(list((self.vault_dir / "Context").glob("*.md")))
-            library_files = len(list((self.vault_dir / "Library").glob("*.md")))
-            total_files = system_files + projects_files + goals_files + tasks_files + context_files + library_files
+                folder_name = self.get_folder_for_supertag(supertag_name)
+                folder_path = self.vault_dir / folder_name
+                folder_stats[folder_name] = 0
 
-            # Run tests
-            test_results = self.run_tests()
+                Colors.info(f"📁 Creating {len(nodes)} files in '{folder_name}' directory")
+
+                for node_info in nodes:
+                    filename = self.create_obsidian_node_file(node_info, supertag_name, folder_path, doc_lookup)
+                    files_created += 1
+                    folder_stats[folder_name] += 1
+
+                Colors.success(f"✅ Created {len(nodes)} files in '{folder_name}' directory")
+
+            # Create comprehensive index files
+            self.create_index_files(nodes_by_supertag, import_file)
 
             # Generate summary
             result = {
                 'success': True,
                 'vault_path': self.vault_dir,
-                'total_nodes': len(self.node_index),
-                'files_created': total_files,
-                'system_files': system_files,
-                'projects_files': projects_files,
-                'goals_files': goals_files,
-                'tasks_files': tasks_files,
-                'context_files': context_files,
-                'library_files': library_files,
-                'wiki_links': sum(len(links) for links in self.wiki_links.values()),
-                'tests': test_results,
-                'message': f"Successfully created Obsidian vault with {len(self.node_index)} nodes"
+                'total_nodes': sum(len(nodes) for nodes in nodes_by_supertag.values()),
+                'supertags_found': len([s for s in nodes_by_supertag.values() if s]),
+                'files_created': files_created,
+                'folder_stats': folder_stats,
+                'message': f"Successfully created enhanced Obsidian vault with {sum(len(nodes) for nodes in nodes_by_supertag.values())} user nodes"
             }
 
             Colors.success(f"✅ {result['message']}")
@@ -604,21 +734,22 @@ def get_import_file():
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
-        description="Convert Tana JSON exports to Obsidian vault",
+        description="Convert Tana JSON exports to enhanced Obsidian vault (user content only)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This tool converts Tana JSON exports into a full Obsidian vault:
+This enhanced tool converts Tana JSON exports into a comprehensive Obsidian vault:
 
-1. Creates a complete Obsidian vault structure
-2. Converts each Tana node to a markdown file
-3. Builds wiki-style links between related nodes
-4. Includes tags and metadata as YAML frontmatter
-5. Creates an index with all nodes and tags
+1. Exports only meaningful user content (no system nodes)
+2. Uses our proven metanode hierarchy detection
+3. Preserves all formatting (bold, italics, links)
+4. Consolidates time-based content into diary folder
+5. Creates smart folder organization
+6. Generates comprehensive navigation and indexes
 
 Examples:
-  tana-obsidian                              # Interactive mode
-  tana-obsidian --file specific.json         # Convert specific file
-  tana-obsidian --files-dir /path/to/files   # Custom files directory
+  tanachat-obsidian-new                      # Interactive mode
+  tanachat-obsidian-new --file specific.json # Convert specific file
+  tanachat-obsidian-new --files-dir /path/to/files   # Custom files directory
         """
     )
 
@@ -629,9 +760,9 @@ Examples:
 
     # Initialize generator
     files_dir = Path(args.files_dir) if args.files_dir else None
-    generator = ObsidianVaultGenerator(files_dir)
+    generator = EnhancedObsidianVaultGenerator(files_dir)
 
-    print(f"{Colors.CYAN}🚀 Tana Obsidian Vault Generator{Colors.END}")
+    print(f"{Colors.CYAN}🚀 Enhanced Tana Obsidian Vault Generator{Colors.END}")
     print(f"Files directory: {generator.tana_io.import_dir}")
     print(f"Vault directory: {generator.vault_dir}")
 
@@ -654,31 +785,24 @@ Examples:
     result = generator.generate_vault(import_file)
 
     if result['success']:
-        print(f"\n{Colors.GREEN}✅ Vault generation completed successfully!{Colors.END}")
+        print(f"\n{Colors.GREEN}✅ Enhanced vault generation completed successfully!{Colors.END}")
         print(f"\n{Colors.BLUE}📊 Summary:{Colors.END}")
         print(f"  Source file: {import_file.name}")
         print(f"  Vault path: {result['vault_path']}")
-        print(f"  Total nodes: {result['total_nodes']}")
+        print(f"  User nodes: {result['total_nodes']}")
+        print(f"  Supertags: {result['supertags_found']}")
         print(f"  Files created: {result['files_created']}")
-        print(f"    System nodes: {result['system_files']}")
-        print(f"    Projects: {result['projects_files']}")
-        print(f"    Goals: {result['goals_files']}")
-        print(f"    Tasks: {result['tasks_files']}")
-        print(f"    Context: {result['context_files']}")
-        print(f"    Library: {result['library_files']}")
-        print(f"  Wiki links: {result['wiki_links']}")
 
-        # Show test results
-        tests = result['tests']
-        passed_tests = sum(1 for test_result in tests.values() if test_result)
-        total_tests = len(tests)
-        print(f"\n{Colors.BLUE}🧪 Tests:{Colors.END} {passed_tests}/{total_tests} passed")
+        print(f"\n{Colors.BLUE}📁 Folder breakdown:{Colors.END}")
+        for folder, count in result['folder_stats'].items():
+            print(f"  📂 {folder}/: {count} files")
 
         print(f"\n{Colors.BLUE}🔗 Next steps:{Colors.END}")
         print(f"  1. Open {result['vault_path']} in Obsidian")
-        print(f"  2. Navigate through the wiki links")
-        print(f"  3. Use the 🏠 Home.md file as your starting point")
-        print(f"  4. Browse folders: Projects/, Goals/, Tasks/, Context/, Library/")
+        print(f"  2. Start with 🏠 Home.md for navigation")
+        print(f"  3. Browse 📅 Diary/ for chronological content")
+        print(f"  4. Explore project, task, and note folders")
+        print(f"  5. Use Obsidian's search and graph view")
     else:
         Colors.error("Vault generation failed")
         sys.exit(1)

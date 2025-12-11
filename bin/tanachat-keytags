@@ -5,10 +5,16 @@ Tana KeyTags Manager - Manage supertag metadata for Tana imports
 Usage: tana-keytags <command> [options]
 
 Commands:
-  list      List current keytags from metadata
-  add       Add supertags to keytags.json
-  remove    Remove supertags from keytags.json
-  validate  Validate keytags against SuperTags.md
+  list          List current keytags from metadata
+  add           Add supertags to keytags
+  remove        Remove supertags from keytags
+  validate      Validate keytags against SuperTags.md
+
+Workspace Commands:
+  workspaces     List all available workspaces
+  use           Set active workspace
+  create        Create new workspace
+  delete        Delete workspace
 
 Requires a valid Tana import to be completed first with tana-importjson
 """
@@ -22,6 +28,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from lib import KeyTagsManager, Colors
+from lib.workspace_keytags_manager import WorkspaceKeyTagsManager
 
 
 def cmd_list(args, manager):
@@ -217,6 +224,117 @@ def cmd_validate(args, manager):
             print(f"  • {suggestion}")
 
 
+def cmd_workspaces(args, manager):
+    """List all available workspaces"""
+    # Get files directory from args or manager
+    files_dir = None
+    if hasattr(args, 'files_dir') and args.files_dir:
+        files_dir = Path(args.files_dir)
+    elif manager:
+        files_dir = manager.files_dir
+
+    workspace_manager = WorkspaceKeyTagsManager(files_dir)
+    workspaces = workspace_manager.list_workspaces()
+
+    print(f"{Colors.CYAN}🏢 Available Workspaces{Colors.END}")
+    if workspaces:
+        print(f"Total workspaces: {len(workspaces)}\n")
+        for ws in workspaces:
+            print(f"  {ws['workspace_id']}")
+            print(f"    Name: {ws['workspace_name']}")
+            print(f"    Supertags: {ws['total_supertags']}")
+            if ws['last_import']:
+                print(f"    Last import: {ws['last_import']}")
+            print(f"    Created: {ws['created_at']}")
+            print()
+    else:
+        Colors.info("No workspaces found. Use 'create' to make one.")
+
+
+def cmd_use(args, manager):
+    """Set active workspace"""
+    if not args.workspace_id:
+        Colors.error("Workspace ID is required")
+        return
+
+    # Get files directory from args or manager
+    files_dir = None
+    if hasattr(args, 'files_dir') and args.files_dir:
+        files_dir = Path(args.files_dir)
+    elif manager:
+        files_dir = manager.files_dir
+
+    workspace_manager = WorkspaceKeyTagsManager(files_dir)
+
+    # Verify workspace exists
+    keytags_data = workspace_manager.load_keytags(args.workspace_id)
+
+    if keytags_data and 'workspace_id' in keytags_data:
+        Colors.success(f"Switched to workspace: {args.workspace_id}")
+        print(f"Total supertags: {keytags_data.get('total_supertags', 0)}")
+    else:
+        Colors.error(f"Workspace '{args.workspace_id}' not found")
+        Colors.info("Available workspaces:")
+        cmd_workspaces(args, None)
+
+
+def cmd_create(args, manager):
+    """Create new workspace"""
+    if not args.workspace_id:
+        Colors.error("Workspace ID is required")
+        return
+
+    if manager is None:
+        workspace_manager = WorkspaceKeyTagsManager()
+    else:
+        workspace_manager = WorkspaceKeyTagsManager(manager.files_dir)
+
+    # Check if workspace already exists
+    workspaces = workspace_manager.list_workspaces()
+    if any(ws['workspace_id'] == args.workspace_id for ws in workspaces):
+        Colors.error(f"Workspace '{args.workspace_id}' already exists")
+        return
+
+    # Create workspace
+    keytags_data = workspace_manager.create_starter_keytags_file(args.workspace_id)
+
+    if keytags_data:
+        Colors.success(f"Created workspace: {args.workspace_id}")
+        print(f"KeyTags file: {workspace_manager.get_keytags_file_path(args.workspace_id)}")
+        if manager:
+            manager.set_workspace(args.workspace_id)
+    else:
+        Colors.error(f"Failed to create workspace: {args.workspace_id}")
+
+
+def cmd_delete(args, manager):
+    """Delete workspace"""
+    if not args.workspace_id:
+        Colors.error("Workspace ID is required")
+        return
+
+    if manager is None:
+        workspace_manager = WorkspaceKeyTagsManager()
+    else:
+        workspace_manager = WorkspaceKeyTagsManager(manager.files_dir)
+
+    # Confirm deletion
+    if not args.yes:
+        response = input(f"{Colors.YELLOW}Delete workspace '{args.workspace_id}'? This cannot be undone. (y/N): {Colors.END} ")
+        if not response.lower().startswith('y'):
+            Colors.info("Operation cancelled")
+            return
+
+    # Delete workspace
+    if workspace_manager.delete_workspace(args.workspace_id):
+        Colors.success(f"Deleted workspace: {args.workspace_id}")
+        # Clear current workspace if it was the deleted one
+        if manager.current_workspace_id == args.workspace_id:
+            manager.current_workspace_id = None
+    else:
+        Colors.error(f"Failed to delete workspace: {args.workspace_id}")
+
+
 def main():
     """Main function"""
     # Create main parser
@@ -230,6 +348,12 @@ Examples:
   tana-keytags remove "project"                        # Remove specific keytag
   tana-keytags remove                                  # Interactive removal
   tana-keytags validate                                # Validate against export
+
+Workspace Examples:
+  tana-keytags workspaces                                # List all workspaces
+  tana-keytags use my_workspace                        # Set active workspace
+  tana-keytags create project_workspace                 # Create new workspace
+  tana-keytags delete old_workspace                       # Delete workspace
 
 Note: Requires a valid Tana import to be completed first with tana-importjson
         """
@@ -257,13 +381,25 @@ Note: Requires a valid Tana import to be completed first with tana-importjson
     # Validate command
     subparsers.add_parser('validate', help='Validate keytags against SuperTags.md')
 
+    # Workspace commands
+    workspaces_parser = subparsers.add_parser('workspaces', help='List all available workspaces')
+
+    use_parser = subparsers.add_parser('use', help='Set active workspace')
+    use_parser.add_argument('workspace_id', help='Workspace ID to use')
+
+    create_parser = subparsers.add_parser('create', help='Create new workspace')
+    create_parser.add_argument('workspace_id', help='Workspace ID to create')
+
+    delete_parser = subparsers.add_parser('delete', help='Delete workspace')
+    delete_parser.add_argument('workspace_id', help='Workspace ID to delete')
+
     # Parse arguments
     args = parser.parse_args()
 
     # Check if command was provided
     if not args.command:
         Colors.error("Usage: tana-keytags <command> [options]")
-        Colors.info("Commands: list, add, remove, validate")
+        Colors.info("Commands: list, add, remove, validate, workspaces, use, create, delete")
         Colors.info("Use 'tana-keytags <command> --help' for command-specific help")
         print(f"\n{Colors.YELLOW}Note: A valid Tana import must be completed first with tana-importjson{Colors.END}")
         sys.exit(1)
@@ -272,8 +408,9 @@ Note: Requires a valid Tana import to be completed first with tana-importjson
     files_dir = Path(args.files_dir) if args.files_dir else None
     manager = KeyTagsManager(files_dir)
 
-    # Check for prerequisite files
-    if args.command != 'list' and not manager.keytags_file.exists():
+    # Check for prerequisite files (skip for workspace commands)
+    workspace_commands = ['workspaces', 'use', 'create', 'delete']
+    if args.command not in workspace_commands and args.command != 'list' and not manager.keytags_file.exists():
         Colors.error(f"KeyTags file not found: {manager.keytags_file}")
         Colors.info("Please run tana-importjson first to create the keytags.json file")
         sys.exit(1)
@@ -295,9 +432,17 @@ Note: Requires a valid Tana import to be completed first with tana-importjson
         cmd_remove(args, manager)
     elif args.command == 'validate':
         cmd_validate(args, manager)
+    elif args.command == 'workspaces':
+        cmd_workspaces(args, None)
+    elif args.command == 'use':
+        cmd_use(args, None)
+    elif args.command == 'create':
+        cmd_create(args, None)
+    elif args.command == 'delete':
+        cmd_delete(args, None)
     else:
         Colors.error(f"Unknown command: {args.command}")
-        Colors.info("Available commands: list, add, remove, validate")
+        Colors.info("Available commands: list, add, remove, validate, workspaces, use, create, delete")
         sys.exit(1)
 
 

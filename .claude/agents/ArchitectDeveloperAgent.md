@@ -37,6 +37,9 @@ Report progress after each phase:
 - All functions documented
 - Error handling for all edge cases
 - No hardcoded values
+- No real user data in test files
+- Import testing uses temp/ directory only
+- Gitleaks security scan passes
 
 ## Implementation Order
 

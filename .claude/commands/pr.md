@@ -84,6 +84,9 @@ ls temp/reports/review-*.md
 - [ ] All tests pass locally
 - [ ] I have updated documentation
 - [ ] I have updated the spec status to "Implemented"
+- [ ] I have verified no real user data is committed
+- [ ] I have run gitleaks and confirmed no secrets
+- [ ] Import-related changes use temp/ directory only
 
 ## Review Report
 

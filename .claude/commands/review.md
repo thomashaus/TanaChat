@@ -44,7 +44,14 @@ cd mcp && uv run ruff check src/
 
 ### Step 4: Security Scan
 ```bash
+# Scan for secrets
 gitleaks detect --source . --verbose
+
+# Scan current files only
+gitleaks detect --no-git --no-banner
+
+# Check temp/ directory for any real data
+find temp/ -name "*real*" -o -name "*actual*" 2>/dev/null | head -5
 ```
 
 ### Step 5: Code Analysis
@@ -55,6 +62,9 @@ Review for:
 - Security vulnerabilities
 - Code duplication
 - Missing tests
+- Hardcoded credentials or secrets
+- Real user data in test files
+- Import processes not using temp/ directory
 
 ## Report Template
 
@@ -120,6 +130,8 @@ Save to: `/temp/reports/review-{timestamp}.md`
 - [ ] Tests pass
 - [ ] Linting clean
 - [ ] No secrets detected
+- [ ] No real user data in committed files
+- [ ] Import testing follows temp/ directory rules
 - [ ] Type hints present
 - [ ] Docstrings adequate
 - [ ] Error handling appropriate

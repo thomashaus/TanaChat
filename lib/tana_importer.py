@@ -206,12 +206,76 @@ class TanaImporter:
         # Handle different Tana JSON formats
         docs = data.get('docs', data.get('nodes', []))
 
+        # Build a mapping of meta node IDs to supertag names
+        # This is needed because Tana uses _metaNodeId to reference supertag definitions
+        # through a metanode hierarchy: Node -> metanode -> tuple -> supertag
+        meta_node_to_supertag = {}
+
+        # Create efficient lookup
+        doc_lookup = {doc.get('id'): doc for doc in docs}
+
+        # Build target supertag ID set
+        target_supertag_ids = set(target_supertags.values())
+
+        print(f"  Building metanode mappings for {len(target_supertag_ids)} target supertags...")
+
+        # Now trace the metanode hierarchy efficiently
+        for doc in docs:
+            if not doc.get('children'):
+                continue
+
+            doc_id = doc.get('id')
+            children = doc.get('children', [])
+
+            # Check if this document has a structure we care about
+            for child_id in children:
+                child_doc = doc_lookup.get(child_id)
+                if not child_doc or not child_doc.get('children'):
+                    continue
+
+                child_children = child_doc.get('children', [])
+                for grandchild_id in child_children:
+                    if grandchild_id in target_supertag_ids:
+                        # Found mapping!
+                        for supertag_name, supertag_id in target_supertags.items():
+                            if grandchild_id == supertag_id:
+                                meta_node_to_supertag[doc_id] = supertag_name
+                                break
+
         def traverse_nodes(items, parent_path=None):
             for item in items:
                 if not isinstance(item, dict):
                     continue
 
-                # Check if this node has any target supertags
+                props = item.get('props', {})
+
+                # Skip supertag definition nodes themselves
+                if props.get('_docType') == 'tagDef':
+                    continue
+
+                # Check if this node has any target supertags via _metaNodeId
+                meta_node_id = props.get('_metaNodeId')
+                if meta_node_id and meta_node_id in meta_node_to_supertag:
+                    supertag_name = meta_node_to_supertag[meta_node_id]
+
+                    # Filter out supertag definition nodes
+                    # These have names like "Field defaults for Everything tagged #X"
+                    # and are not actual content nodes
+                    node_name = props.get('name', '')
+                    if not node_name.startswith('Field defaults for'):
+                        if supertag_name not in nodes_by_supertag:
+                            nodes_by_supertag[supertag_name] = []
+
+                        nodes_by_supertag[supertag_name].append({
+                            'name': node_name or 'Untitled',
+                            'node_id': item.get('id', item.get('uid', 'unknown')),
+                            'description': props.get('description', ''),
+                            'created': props.get('created'),
+                            'children': item.get('children', []),
+                            'path': parent_path
+                        })
+
+                # Also check for direct supertag references (legacy format)
                 node_supertags = item.get('supertags', [])
                 for supertag in node_supertags:
                     if isinstance(supertag, dict):
@@ -224,18 +288,16 @@ class TanaImporter:
                                 supertag_name.lower() == target_name.lower()):
 
                                 # Filter out supertag definition nodes
-                                # These have names like "Field defaults for Everything tagged #X"
-                                # and are not actual content nodes
-                                node_name = item.get('name', '')
+                                node_name = props.get('name', '')
                                 if not node_name.startswith('Field defaults for'):
                                     if target_name not in nodes_by_supertag:
                                         nodes_by_supertag[target_name] = []
 
                                     nodes_by_supertag[target_name].append({
-                                        'name': item.get('name', 'Untitled'),
+                                        'name': node_name or 'Untitled',
                                         'node_id': item.get('id', item.get('uid', 'unknown')),
-                                        'description': item.get('description', ''),
-                                        'created': item.get('created'),
+                                        'description': props.get('description', ''),
+                                        'created': props.get('created'),
                                         'children': item.get('children', []),
                                         'path': parent_path
                                     })
@@ -243,7 +305,7 @@ class TanaImporter:
                 # Recursively process children
                 children = item.get('children', [])
                 if children:
-                    current_name = item.get('name', 'Untitled')
+                    current_name = props.get('name', 'Untitled')
                     current_path = f"{parent_path} / {current_name}" if parent_path else current_name
                     traverse_nodes(children, current_path)
 
@@ -256,46 +318,98 @@ class TanaImporter:
         """Format node content as markdown"""
         content = []
 
-        # Node name
+        # Node name (title)
         node_name = node_info.get('name', 'Untitled')
-        content.append(f"# {node_name}\n")
+        content.append(f"# {node_name}")
 
-        # Node ID
+        # Node metadata
         node_id = node_info.get('node_id', 'unknown')
-        content.append(f"**Node ID:** `{node_id}`\n")
+        content.append(f"**Node ID:** `{node_id}`")
 
         # Description
         description = node_info.get('description', '')
         if description and description.strip():
-            content.append(f"**Description:** {description}\n")
+            content.append(f"**Description:** {description}")
 
         # Created date
         created = node_info.get('created')
         if created:
             if isinstance(created, str):
                 # ISO format string
-                content.append(f"**Created:** {created}\n")
+                content.append(f"**Created:** {created}")
             else:
                 # Timestamp in milliseconds
                 created_date = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M:%S')
-                content.append(f"**Created:** {created_date}\n")
+                content.append(f"**Created:** {created_date}")
 
         # Path
         path = node_info.get('path', '')
         if path:
-            content.append(f"**Path:** {path}\n")
+            content.append(f"**Path:** {path}")
 
         content.append("---")
+        content.append("")
 
-        # Children
+        # Children and subnodes as structured data
         children = node_info.get('children', [])
         if children:
-            content.extend(self.format_children(children))
+            content.append("## 📋 Content & Subnodes")
+            content.extend(self.format_children_as_data(children))
 
         return '\n'.join(content)
 
+    def format_children_as_data(self, children: List[Any], level: int = 0) -> List[str]:
+        """Format child nodes as structured data in markdown"""
+        content = []
+
+        for child in children:
+            if isinstance(child, str):
+                # This is a reference to another node
+                content.append(f"- **Reference:** `{child}`")
+                continue
+
+            if isinstance(child, dict):
+                child_name = child.get('name', 'Untitled')
+                child_id = child.get('id', child.get('uid', 'unknown'))
+                child_desc = child.get('description', '')
+                child_created = child.get('created')
+
+                # Create structured data block for each child
+                content.append(f"### {child_name}")
+                content.append(f"```yaml")
+                content.append(f"name: {child_name}")
+                content.append(f"node_id: {child_id}")
+
+                if child_desc:
+                    content.append(f"description: {child_desc}")
+
+                if child_created:
+                    if isinstance(child_created, str):
+                        content.append(f"created: {child_created}")
+                    else:
+                        created_date = datetime.fromtimestamp(child_created/1000).strftime('%Y-%m-%d %H:%M:%S')
+                        content.append(f"created: {created_date}")
+
+                # Check for additional properties
+                props = child.get('props', {})
+                if props:
+                    content.append("properties:")
+                    for key, value in props.items():
+                        if key not in ['name', 'description', 'created']:
+                            content.append(f"  {key}: {value}")
+
+                content.append("```")
+                content.append("")
+
+                # Recursively process children
+                child_children = child.get('children', [])
+                if child_children:
+                    content.extend(self.format_children_as_data(child_children, level + 1))
+
+        return content
+
     def format_children(self, children: List[Any], level: int = 0) -> List[str]:
-        """Format child nodes as markdown"""
+        """Format child nodes as markdown (legacy method)"""
         content = []
 
         for child in children:
@@ -322,9 +436,15 @@ class TanaImporter:
 
         return content
 
-    def create_supertag_directories(self, nodes_by_supertag: Dict[str, List[Dict[str, Any]]], export_dir: Path) -> int:
-        """Create directories and markdown files for each supertag"""
+    def create_supertag_directories(self, nodes_by_supertag: Dict[str, List[Dict[str, Any]]], export_dir: Path, data: Dict[str, Any] = None) -> int:
+        """Create directories and markdown files for each supertag with index + individual node files"""
         total_files_created = 0
+
+        # Create doc_lookup for efficient child content resolution
+        doc_lookup = {}
+        if data:
+            docs = data.get('docs', data.get('nodes', []))
+            doc_lookup = {doc.get('id'): doc for doc in docs}
 
         for supertag_name, nodes in nodes_by_supertag.items():
             if not nodes:
@@ -337,25 +457,213 @@ class TanaImporter:
 
             Colors.info(f"📁 Creating {len(nodes)} files in '{supertag_name}' directory")
 
-            # Create markdown file for each node
+            # First, create all individual node files using node ID as filename
+            node_files = {}
             for node_info in nodes:
-                # Use node ID as filename to ensure uniqueness
-                node_id = str(node_info['node_id'])
+                node_id = node_info.get('node_id', 'unknown')
                 filename = f"{node_id}.md"
                 file_path = supertag_dir / filename
 
-                # Format content
-                markdown_content = self.format_node_content(node_info)
+                # Format content with the new structure
+                markdown_content = self.format_node_content_new(node_info, supertag_name, doc_lookup)
 
-                # Write file
+                # Write individual node file
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(markdown_content)
 
+                node_files[node_id] = {
+                    'name': node_info.get('name', 'Untitled'),
+                    'filename': filename,
+                    'created': node_info.get('created'),
+                    'description': node_info.get('description', '')
+                }
                 total_files_created += 1
 
-            Colors.success(f"✅ Created {len(nodes)} files in '{supertag_name}' directory")
+            # Create index file for the supertag
+            index_content = self.create_supertag_index(supertag_name, node_files)
+            index_path = supertag_dir / f"{supertag_name.replace(' ', '-').lower()}.md"
+
+            with open(index_path, 'w', encoding='utf-8') as f:
+                f.write(index_content)
+
+            total_files_created += 1
+            Colors.success(f"✅ Created {len(nodes) + 1} files in '{supertag_name}' directory")
 
         return total_files_created
+
+    def create_supertag_index(self, supertag_name: str, node_files: Dict[str, Dict[str, Any]]) -> str:
+        """Create an index file for a supertag with links to all node files"""
+        content = []
+        content.append(f"# {supertag_name.title()}")
+        content.append(f"")
+        content.append(f"**Total nodes:** {len(node_files)}")
+        content.append("")
+        content.append("## 📋 All Nodes")
+        content.append("")
+
+        # Sort nodes by name
+        sorted_nodes = sorted(node_files.items(), key=lambda x: x[1]['name'].lower())
+
+        for node_id, node_info in sorted_nodes:
+            name = node_info['name']
+            filename = node_info['filename']
+            description = node_info.get('description', '')
+            created = node_info.get('created')
+
+            # Create Obsidian-style link
+            content.append(f"- [[{filename}|{name}]]")
+
+            # Add description if available
+            if description and description.strip():
+                content.append(f"  - {description}")
+
+            # Add created date if available
+            if created:
+                if isinstance(created, str):
+                    content.append(f"  - **Created:** {created}")
+                else:
+                    created_date = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d')
+                    content.append(f"  - **Created:** {created_date}")
+
+            content.append("")
+
+        return '\n'.join(content)
+
+    def format_node_content_new(self, node_info: Dict[str, Any], supertag_name: str, doc_lookup: Dict[str, Any] = None) -> str:
+        """Format node content as markdown with the new structure, preserving formatting"""
+        content = []
+
+        # Node name (title) - this is the main heading
+        node_name = node_info.get('name', 'Untitled')
+        content.append(f"# {node_name}")
+        content.append("")
+
+        # Supertags section
+        content.append(f"## 🏷️ Supertags")
+        content.append(f"- **{supertag_name.title()}**")
+        content.append("")
+
+        # Children section - preserve formatting and content
+        children = node_info.get('children', [])
+        if children:
+            content.append("## 📋 Children")
+            content.append("")
+
+            # We need to get the full child data to preserve content
+            for child_id in children:
+                child_content = self.get_child_content(child_id, node_info.get('node_id'), doc_lookup)
+                if child_content:
+                    content.append(child_content)
+
+            content.append("")
+
+        # Node metadata (collapsible)
+        content.append("## 📝 Node Details")
+        content.append(f"**Node ID:** `{node_info.get('node_id', 'unknown')}`")
+
+        # Created date
+        created = node_info.get('created')
+        if created:
+            if isinstance(created, str):
+                content.append(f"**Created:** {created}")
+            else:
+                created_date = datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M:%S')
+                content.append(f"**Created:** {created_date}")
+
+        # Description
+        description = node_info.get('description', '')
+        if description and description.strip():
+            content.append(f"**Description:** {description}")
+
+        # Path
+        path = node_info.get('path', '')
+        if path:
+            content.append(f"**Path:** {path}")
+
+        return '\n'.join(content)
+
+    def get_child_content(self, child_id: str, parent_node_id: str, doc_lookup: Dict[str, Any] = None) -> str:
+        """Get child content preserving formatting, returning markdown"""
+        if not doc_lookup:
+            # Fallback if no doc lookup available
+            return f"- [[{child_id}.md]]"
+
+        child_doc = doc_lookup.get(child_id)
+        if not child_doc:
+            # Child not found in lookup, treat as reference
+            return f"- [[{child_id}.md]]"
+
+        props = child_doc.get('props', {})
+
+        # Check if this is a named node (regular Tana node)
+        child_name = props.get('name')
+        if child_name and child_name.strip():
+            # Create Obsidian-style link with display name
+            return f"- [[{child_id}.md|{child_name}]]"
+
+        # If no name, this might be content-only. Check for actual content fields
+        content_fields = ['description', 'content', 'text']
+        for field in content_fields:
+            if field in props and props[field]:
+                content = props[field]
+                if isinstance(content, str) and content.strip():
+                    # Return the content as-is to preserve formatting
+                    # Add some spacing to make it look better
+                    if not content.startswith(('\n', '\r')):
+                        return f"- {content}"
+                    else:
+                        # If content starts with newlines, preserve structure
+                        lines = content.strip().split('\n')
+                        if len(lines) == 1:
+                            return f"- {lines[0]}"
+                        else:
+                            # Multi-line content - format properly
+                            result = [f"- {lines[0]}"]
+                            for line in lines[1:]:
+                                result.append(f"  {line}")
+                            return '\n'.join(result)
+
+        # If no explicit content fields, check for other metadata that might be content
+        # Look for fields that could contain rich text
+        for key, value in props.items():
+            if key not in ['created', '_ownerId', '_flags', '_metaNodeId', '_docType', '_sourceId']:
+                if isinstance(value, str) and value.strip() and len(value) > 20:
+                    # This looks like content rather than metadata
+                    return f"- {value}"
+
+        # Last resort - create a generic reference
+        return f"- [[{child_id}.md|Child Node]]"
+
+    def sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename for filesystem compatibility"""
+        import re
+
+        # Replace problematic characters with underscores or remove them
+        # Keep letters, numbers, spaces, hyphens, underscores, and parentheses
+        sanitized = re.sub(r'[^\w\s\-\(\)]', '', filename)
+
+        # Replace multiple spaces with single space
+        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+
+        # Replace spaces with hyphens for markdown convention
+        sanitized = sanitized.replace(' ', '-')
+
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = 'unnamed-node'
+
+        # Limit length to avoid filesystem issues (excluding .md extension)
+        max_length = 80
+        if len(sanitized) > max_length and sanitized.endswith('.md'):
+            sanitized = sanitized[:max_length-3] + '.md'
+        elif len(sanitized) > max_length:
+            sanitized = sanitized[:max_length-3] + '...'
+
+        # Add .md extension
+        if not sanitized.endswith('.md'):
+            sanitized += '.md'
+
+        return sanitized
 
     def create_import_summary(self, import_file: Path, supertags: List[Dict[str, Any]], keytags_data: Dict[str, Any],
                              nodes_by_supertag: Dict[str, List[Dict[str, Any]]], total_markdown_files: int,
@@ -477,7 +785,7 @@ class TanaImporter:
         nodes_by_supertag = self.extract_nodes_by_supertag(data, keytags_data)
 
         # Create directory structure
-        total_markdown_files = self.create_supertag_directories(nodes_by_supertag, self.tana_io.export_dir)
+        total_markdown_files = self.create_supertag_directories(nodes_by_supertag, self.tana_io.export_dir, data)
 
         # Only create metadata files if there's actual content to export
         has_content = total_markdown_files > 0 or len(supertags) > 0

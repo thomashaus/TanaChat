@@ -54,4 +54,11 @@ local/tmp/
 
 # Sensitive data
 files/metadata/users.json
-files/import/*.json
+
+# Files in these directories (but keep the directories)
+files/import/*
+!files/import/.gitkeep
+files/export/*
+!files/export/.gitkeep
+files/metadata/*
+!files/metadata/.gitkeep

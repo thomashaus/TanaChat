@@ -3,6 +3,7 @@ import { Homepage } from './components/Homepage';
 import { HealthDashboard } from './components/HealthDashboard';
 import { SwaggerUI } from './components/SwaggerUI';
 import { TanaUpload } from './components/TanaUpload';
+import { OutlineGenerator } from './components/OutlineGenerator';
 import { SignIn } from './components/Auth/SignIn';
 import { SignUp } from './components/Auth/SignUp';
 import { Profile } from './components/Profile';
@@ -50,6 +51,7 @@ function App() {
           <Route path="/docs" element={<SwaggerUI />} />
           <Route path="/hub" element={<DocumentationHub />} />
           <Route path="/upload" element={<TanaUpload />} />
+          <Route path="/outline" element={<OutlineGenerator />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="*" element={<NotFound />} />
