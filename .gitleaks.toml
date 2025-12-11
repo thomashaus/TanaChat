@@ -46,3 +46,46 @@ id = "generic-api-key"
 description = "Generic API key pattern"
 regex = '''(?i)(access_key|api_key|secret_key|password|token)\s*[=:]\s*['"]?[a-zA-Z0-9]{20,}['"]?'''
 tags = ["key", "api", "secret", "password", "token"]
+
+# Enhanced TanaChat-specific rules
+[[rules]]
+id = "tanachat-workspace-id"
+description = "TanaChat workspace ID pattern"
+regex = '''(?i)(workspace_id|workspaceid|tanachat.*workspace)\s*[=:]\s*['"]?[a-zA-Z0-9_-]{10,}['"]?'''
+tags = ["workspace", "id", "tanachat"]
+entropy = 2.5
+
+[[rules]]
+id = "jwt-token"
+description = "JWT token pattern"
+regex = '''eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*'''
+tags = ["jwt", "token"]
+entropy = 3.5
+
+[[rules]]
+id = "webhook-secret"
+description = "Webhook secret pattern"
+regex = '''(?i)(webhook_secret|webhook.*secret)\s*[=:]\s*['"]?[a-zA-Z0-9_-]{10,}['"]?'''
+tags = ["webhook", "secret"]
+entropy = 3.0
+
+# Enhanced allowlist for false positives
+[[allowlist.files]]
+paths = ['''temp/sample\.json''']
+description = "Sample data file"
+
+[[allowlist.files]]
+paths = ['''README\.md''']
+description = "Documentation file"
+
+[[allowlist.files]]
+paths = ['''CLAUDE\.md''']
+description = "Project documentation"
+
+[[allowlist.regexes]]
+regex = '''SYS_[A-Z0-9_]+'''
+description = "Tana system identifiers"
+
+[[allowlist.regexes]]
+regex = '''https?://(localhost|127\.0\.0\.1|0\.0\.0\.0):[0-9]+'''
+description = "Local development URLs"

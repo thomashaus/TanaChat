@@ -1,0 +1,284 @@
+asyncapi: 3.0.0
+info:
+  title: TanaChat MCP API
+  version: 1.0.0
+  description: |
+    AsyncAPI specification for TanaChat MCP Server real-time operations.
+
+    This document describes the asynchronous messaging patterns used by
+    TanaChat for real-time workspace updates, change notifications, and
+    MCP protocol communication.
+servers:
+  production:
+    host: tanachat-mcp-u43ej.ondigitalocean.app
+    protocol: https
+    description: Production MCP server
+
+  development:
+    host: localhost:8000
+    protocol: http
+    description: Development MCP server
+
+channels:
+  supertag/changes:
+    description: Real-time supertag change notifications
+    address: supertag/changes
+    messages:
+      supertagChangeEvent:
+        $ref: '#/components/messages/SupertagChangeEvent'
+
+  node/updates:
+    description: Real-time node update notifications
+    address: node/updates
+    messages:
+      nodeUpdateEvent:
+        $ref: '#/components/messages/NodeUpdateEvent'
+
+  workspace/sync:
+    description: Workspace synchronization events
+    address: workspace/sync
+    messages:
+      workspaceSyncEvent:
+        $ref: '#/components/messages/WorkspaceSyncEvent'
+
+operations:
+  receiveSupertagChanges:
+    action: receive
+    channel:
+      $ref: '#/channels/supertag%2Fchanges'
+    bindings:
+      http:
+        type: request
+        method: GET
+        query:
+          type: object
+          properties:
+            workspace_id:
+              type: string
+              description: Workspace ID to monitor
+            since:
+              type: string
+              format: date-time
+              description: Get changes since this timestamp
+
+  receiveNodeUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/node%2Fupdates'
+    bindings:
+      http:
+        type: request
+        method: POST
+        body:
+          schema:
+            type: object
+            properties:
+              node_id:
+                type: string
+                description: Node ID to watch
+              watch_children:
+                type: boolean
+                description: Also watch child nodes
+
+components:
+  messages:
+    SupertagChangeEvent:
+      name: SupertagChangeEvent
+      title: Supertag Change Event
+      summary: Emitted when supertags are added, removed, or modified
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            enum: [added, removed, modified]
+            description: Type of change event
+          workspace_id:
+            type: string
+            description: Workspace where change occurred
+          supertag:
+            $ref: '#/components/schemas/Supertag'
+          timestamp:
+            type: string
+            format: date-time
+            description: When the change occurred
+          changes:
+            type: object
+            description: Detailed change information
+            properties:
+              previous_name:
+                type: string
+              new_name:
+                type: string
+              usage_change:
+                type: object
+                properties:
+                  old_count:
+                    type: integer
+                  new_count:
+                    type: integer
+
+    NodeUpdateEvent:
+      name: NodeUpdateEvent
+      title: Node Update Event
+      summary: Emitted when nodes are created, modified, or deleted
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            enum: [created, modified, deleted, appended]
+            description: Type of node event
+          node_id:
+            type: string
+            description: ID of the affected node
+          workspace_id:
+            type: string
+            description: Workspace containing the node
+          timestamp:
+            type: string
+            format: date-time
+            description: When the change occurred
+          changes:
+            oneOf:
+              - $ref: '#/components/schemas/NodeContentChange'
+              - $ref: '#/components/schemas/NodeStructureChange'
+
+    WorkspaceSyncEvent:
+      name: WorkspaceSyncEvent
+      title: Workspace Sync Event
+      summary: Emitted during workspace synchronization
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          sync_type:
+            type: string
+            enum: [initial, incremental, full]
+            description: Type of synchronization
+          workspace_id:
+            type: string
+            description: Workspace being synchronized
+          status:
+            type: string
+            enum: [started, progress, completed, error]
+            description: Sync status
+          progress:
+            type: object
+            properties:
+              current:
+                type: integer
+                description: Current progress count
+              total:
+                type: integer
+                description: Total items to process
+              percentage:
+                type: number
+                minimum: 0
+                maximum: 100
+                description: Progress percentage
+          errors:
+            type: array
+            items:
+              type: string
+              description: Any errors encountered during sync
+
+  schemas:
+    Supertag:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: Unique supertag identifier
+          example: "project-tag-123"
+        name:
+          type: string
+          description: Human-readable supertag name
+          example: "Project"
+        description:
+          type: string
+          description: Supertag description
+          example: "Project management supertag"
+        usage_count:
+          type: integer
+          description: Number of nodes using this supertag
+          example: 25
+        workspace_id:
+          type: string
+          description: Workspace containing this supertag
+          example: "workspace-456"
+        metadata:
+          type: object
+          description: Additional supertag metadata
+          properties:
+            color:
+              type: string
+              description: Color code for the supertag
+            icon:
+              type: string
+              description: Icon identifier
+            created_at:
+              type: string
+              format: date-time
+            modified_at:
+              type: string
+              format: date-time
+
+    NodeContentChange:
+      type: object
+      properties:
+        content_type:
+          type: string
+          enum: [text, structure, metadata]
+          description: Type of content change
+        old_content:
+          type: string
+          description: Previous content (if applicable)
+        new_content:
+          type: string
+          description: New or updated content
+        content_diff:
+          type: string
+          description: Unified diff of changes
+        append_position:
+          type: string
+          enum: [start, end, before_section, after_section]
+          description: Where content was appended (for append events)
+        section_name:
+          type: string
+          description: Section name for positional appends
+
+    NodeStructureChange:
+      type: object
+      properties:
+        change_type:
+          type: string
+          enum: [child_added, child_removed, parent_changed, moved]
+          description: Type of structural change
+        child_node_id:
+          type: string
+          description: ID of affected child node (if applicable)
+        old_parent_id:
+          type: string
+          description: Previous parent node ID
+        new_parent_id:
+          type: string
+          description: New parent node ID
+        position:
+          type: integer
+          description: New position in sibling order
+
+tags:
+  - name: supertag
+    description: Supertag-related operations
+  - name: node
+    description: Node content operations
+  - name: workspace
+    description: Workspace management
+  - name: mcp
+    description: Model Context Protocol operations

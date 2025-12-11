@@ -155,10 +155,68 @@ logging.info("Environment validation disabled for testing")
 # Create FastAPI app
 app = FastAPI(
     title="TanaChat API & MCP Server",
-    description="API server and MCP endpoint for Tana workspace management - Updated with real functionality",
-    version="0.1.1",
-    docs_url="/docs",  # Enable docs
-    redoc_url="/redoc",  # Enable redoc
+    description="""
+# TanaChat API & MCP Server
+
+Complete API server and MCP endpoint for Tana workspace management with real-time functionality.
+
+## Features
+- **5 REST API Endpoints**: Complete Tana workspace operations
+- **5 MCP Tools**: AI assistant integration
+- **Dynamic Supertag Management**: Real-time change detection
+- **Multi-tenant Workspace Support**: Isolated user environments
+- **JSON Parsing Engine**: Multi-format Tana export support
+- **Backup System**: Automatic data protection
+
+## Authentication
+Protected endpoints require a Bearer token in the Authorization header:
+```
+Authorization: Bearer your_api_token_here
+```
+
+## Quick Start
+1. **Health Check**: `GET /health`
+2. **API Documentation**: `GET /docs`
+3. **MCP Protocol**: `POST /mcp`
+""",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {
+            "name": "Health",
+            "description": "Health check and status endpoints"
+        },
+        {
+            "name": "Authentication",
+            "description": "User authentication and token management"
+        },
+        {
+            "name": "Tana API",
+            "description": "Core Tana workspace operations"
+        },
+        {
+            "name": "Supertags",
+            "description": "Supertag management and operations"
+        },
+        {
+            "name": "Nodes",
+            "description": "Node content management"
+        },
+        {
+            "name": "MCP",
+            "description": "Model Context Protocol operations"
+        }
+    ],
+    contact={
+        "name": "TanaChat Support",
+        "url": "https://github.com/thomashaus/TanaChat",
+        "email": "support@tanachat.ai"
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://github.com/thomashaus/TanaChat/blob/main/LICENSE"
+    }
 )
 
 def custom_openapi():
